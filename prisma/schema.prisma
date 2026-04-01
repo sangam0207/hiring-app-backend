@@ -1,0 +1,138 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  HR
+  CANDIDATE
+}
+
+enum JobStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  CLOSED
+}
+
+enum ApplicationStatus {
+  APPLIED
+  SCREENING
+  SHORTLISTED
+  INTERVIEW_SCHEDULED
+  INTERVIEWED
+  SELECTED
+  REJECTED
+}
+
+enum ExperienceLevel {
+  ENTRY
+  JUNIOR
+  MID
+  SENIOR
+  LEAD
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  password     String
+  name         String
+  role         UserRole
+  company      String?  // For HR users
+  phone        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  postedJobs   Job[]          @relation("HRJobs")
+  applications Application[]  @relation("CandidateApplications")
+
+  @@map("users")
+}
+
+model Job {
+  id              String          @id @default(uuid())
+  title           String
+  description     String          @db.Text
+  requirements    String          @db.Text
+  requiredSkills  String[]
+  experienceLevel ExperienceLevel
+  location        String?
+  salary          String?
+  jobType         String?         // Full-time, Part-time, Remote
+  status          JobStatus       @default(DRAFT)
+  hrId            String
+  hr              User            @relation("HRJobs", fields: [hrId], references: [id], onDelete: Cascade)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  applications    Application[]
+
+  @@map("jobs")
+}
+
+model Application {
+  id              String            @id @default(uuid())
+  jobId           String
+  job             Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  candidateId     String
+  candidate       User              @relation("CandidateApplications", fields: [candidateId], references: [id], onDelete: Cascade)
+  status          ApplicationStatus @default(APPLIED)
+  coverLetter     String?           @db.Text
+  resumeUrl       String            // Path/URL to uploaded resume
+  resumeFileName  String
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  // Resume Parsing Results
+  parsedResume    ParsedResume?
+
+  @@unique([jobId, candidateId])
+  @@map("applications")
+}
+
+model ParsedResume {
+  id                  String      @id @default(uuid())
+  applicationId       String      @unique
+  application         Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  // Extracted Info
+  candidateName       String?
+  email               String?
+  phone               String?
+  location            String?
+  summary             String?     @db.Text
+
+  // Skills & Experience
+  extractedSkills     String[]
+  totalExperience     Float?      // in years
+  currentRole         String?
+  education           Json?       // Array of {degree, institution, year}
+  workExperience      Json?       // Array of {company, role, duration, description}
+  projects            Json?       // Array of {name, description, technologies}
+  certifications      String[]
+  languages           String[]
+
+  // AI Matching & Scoring
+  matchScore          Float       // 0-100
+  skillMatchScore     Float       // 0-100
+  experienceScore     Float       // 0-100
+  overallScore        Float       // 0-100
+
+  // AI Insights
+  strengths           String[]
+  gaps                String[]
+  aiSummary           String?     @db.Text
+  recommendationNote  String?     @db.Text
+  isRecommended       Boolean     @default(false)
+
+  parsedAt            DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  @@map("parsed_resumes")
+}
