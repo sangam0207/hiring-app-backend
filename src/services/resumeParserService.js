@@ -135,4 +135,64 @@ Scoring Guidelines:
   };
 };
 
-module.exports = { parseResumeWithAI };
+/**
+ * Parse resume text for profile auto-fill (no job matching, just extraction)
+ */
+const parseProfileFromResume = async (resumeText) => {
+  const systemPrompt = `You are an expert resume parser. Extract structured information from resumes. Always respond with valid JSON only. No markdown, no explanation outside JSON.`;
+
+  const userPrompt = `Extract all structured information from this resume and return a JSON object.
+
+=== RESUME TEXT ===
+${resumeText}
+
+=== REQUIRED JSON RESPONSE FORMAT ===
+{
+  "name": "full name",
+  "phone": "phone number or null",
+  "headline": "professional headline (e.g. 'Senior React Developer with 5+ years experience')",
+  "summary": "professional summary (2-4 sentences)",
+  "location": "city, country or null",
+  "currentCompany": "most recent company or null",
+  "currentRole": "most recent job title or null",
+  "totalExperience": number (years, e.g. 3.5),
+  "skills": ["skill1", "skill2", ...],
+  "education": [{"degree": "string", "institution": "string", "year": "string or null", "field": "string or null"}],
+  "workExperience": [{"company": "string", "role": "string", "duration": "string (e.g. Jan 2021 - Dec 2023)", "description": "string"}],
+  "certifications": ["cert1", "cert2"],
+  "languages": ["English", "Hindi"]
+}
+
+Extract as much as possible. If a field is not found, use null or empty array.`;
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    temperature: 0.1,
+    max_tokens: 2000,
+    response_format: { type: "json_object" },
+  });
+
+  const parsed = JSON.parse(response.choices[0].message.content);
+
+  return {
+    name: parsed.name || null,
+    phone: parsed.phone || null,
+    headline: parsed.headline || null,
+    summary: parsed.summary || null,
+    location: parsed.location || null,
+    currentCompany: parsed.currentCompany || null,
+    currentRole: parsed.currentRole || null,
+    totalExperience: parseFloat(parsed.totalExperience) || null,
+    skills: Array.isArray(parsed.skills) ? parsed.skills : [],
+    education: Array.isArray(parsed.education) ? parsed.education : [],
+    workExperience: Array.isArray(parsed.workExperience) ? parsed.workExperience : [],
+    certifications: Array.isArray(parsed.certifications) ? parsed.certifications : [],
+    languages: Array.isArray(parsed.languages) ? parsed.languages : [],
+  };
+};
+
+module.exports = { parseResumeWithAI, parseProfileFromResume };

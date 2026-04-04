@@ -1,5 +1,5 @@
 const prisma = require("../config/prisma");
-const { uploadResume, fetchFileAsBuffer } = require("../services/s3Service");
+const { uploadResume, fetchFileAsBuffer, deleteResume } = require("../services/s3Service");
 const { extractTextFromResume } = require("../utils/resumeExtractor");
 const { parseResumeWithAI } = require("../services/resumeParserService");
 const { successResponse, errorResponse, paginatedResponse } = require("../utils/response");
@@ -8,11 +8,12 @@ const { successResponse, errorResponse, paginatedResponse } = require("../utils/
 const applyToJob = async (req, res, next) => {
   try {
     const { jobId } = req.params;
-    const { coverLetter } = req.body;
+    const { coverLetter, resumeId } = req.body;
     const candidateId = req.user.id;
 
-    if (!req.file) {
-      return errorResponse(res, "Resume file is required.");
+    // Must provide either a file upload or a saved resumeId
+    if (!req.file && !resumeId) {
+      return errorResponse(res, "Resume file or saved resume selection is required.");
     }
 
     // Check job exists and is active
@@ -30,21 +31,48 @@ const applyToJob = async (req, res, next) => {
       return errorResponse(res, "You have already applied to this job.", 409);
     }
 
-    // Upload resume buffer → S3 → get back public URL
-    const resumeUrl = await uploadResume(
-      req.file.buffer,
-      req.file.originalname,
-      req.file.mimetype
-    );
+    let resumeUrl, resumeFileName, fileBuffer, fileMimetype, savedResumeId = null;
 
-    // Create application with S3 URL
+    if (resumeId) {
+      // Using a saved resume
+      const savedResume = await prisma.resume.findUnique({ where: { id: resumeId } });
+      if (!savedResume || savedResume.userId !== candidateId) {
+        return errorResponse(res, "Selected resume not found.", 404);
+      }
+      resumeUrl = savedResume.fileUrl;
+      resumeFileName = savedResume.fileName;
+      savedResumeId = savedResume.id;
+
+      // Fetch file buffer from S3 for parsing
+      fileBuffer = await fetchFileAsBuffer(resumeUrl);
+      const ext = resumeFileName.split(".").pop().toLowerCase();
+      const mimetypeMap = {
+        pdf: "application/pdf",
+        doc: "application/msword",
+        docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      };
+      fileMimetype = mimetypeMap[ext] || "application/pdf";
+    } else {
+      // New file upload (original behavior)
+      resumeUrl = await uploadResume(
+        req.file.buffer,
+        req.file.originalname,
+        req.file.mimetype
+      );
+      resumeFileName = req.file.originalname;
+      fileBuffer = req.file.buffer;
+      fileMimetype = req.file.mimetype;
+    }
+
+    // Create application
     const application = await prisma.application.create({
       data: {
         jobId,
         candidateId,
         coverLetter: coverLetter || null,
-        resumeUrl,                          // S3 URL stored here
-        resumeFileName: req.file.originalname,
+        resumeUrl,
+        resumeFileName,
+        resumeId: savedResumeId,
         status: "APPLIED",
       },
       include: {
@@ -53,11 +81,11 @@ const applyToJob = async (req, res, next) => {
       },
     });
 
-    // Trigger async resume parsing — pass buffer directly (already in memory)
+    // Trigger async resume parsing
     parseResumeInBackground(
       application.id,
-      req.file.buffer,
-      req.file.mimetype,
+      fileBuffer,
+      fileMimetype,
       job
     ).catch((err) =>
       console.error(`Resume parsing failed for application ${application.id}:`, err)

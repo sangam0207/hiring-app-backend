@@ -62,6 +62,10 @@ const getJobs = async (req, res, next) => {
       experienceLevel,
       status,
       jobType,
+      datePosted,
+      company,
+      location,
+      applicants,
     } = req.query;
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -70,11 +74,26 @@ const getJobs = async (req, res, next) => {
     // HR sees their own jobs; candidates see ACTIVE jobs
     const isHR = req.user?.role === "HR";
 
+    // Date posted filter
+    let dateFilter = {};
+    if (datePosted) {
+      const now = new Date();
+      if (datePosted === "24h")
+        dateFilter = { createdAt: { gte: new Date(now.getTime() - 24 * 60 * 60 * 1000) } };
+      else if (datePosted === "week")
+        dateFilter = { createdAt: { gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) } };
+      else if (datePosted === "month")
+        dateFilter = { createdAt: { gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) } };
+    }
+
     const where = {
       ...(isHR ? { hrId: req.user.id } : { status: "ACTIVE" }),
       ...(status && isHR && { status }),
       ...(experienceLevel && { experienceLevel }),
       ...(jobType && { jobType }),
+      ...dateFilter,
+      ...(location && { location: { contains: location, mode: "insensitive" } }),
+      ...(company && { hr: { company: { contains: company, mode: "insensitive" } } }),
       ...(search && {
         OR: [
           { title: { contains: search, mode: "insensitive" } },
@@ -83,6 +102,46 @@ const getJobs = async (req, res, next) => {
         ],
       }),
     };
+
+    // If applicants filter is active, use two-pass approach (filter by count)
+    if (applicants) {
+      let minApp = 0, maxApp = Infinity;
+      if (applicants === "0") { minApp = 0; maxApp = 0; }
+      else if (applicants === "1-10") { minApp = 1; maxApp = 10; }
+      else if (applicants === "11-50") { minApp = 11; maxApp = 50; }
+      else if (applicants === "50+") { minApp = 51; }
+
+      const allJobs = await prisma.job.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        select: { id: true, _count: { select: { applications: true } } },
+      });
+
+      const filteredIds = allJobs
+        .filter(j => j._count.applications >= minApp && j._count.applications <= maxApp)
+        .map(j => j.id);
+
+      const total = filteredIds.length;
+      const paginatedIds = filteredIds.slice(skip, skip + take);
+
+      const jobs = paginatedIds.length > 0
+        ? await prisma.job.findMany({
+            where: { id: { in: paginatedIds } },
+            orderBy: { createdAt: "desc" },
+            include: {
+              hr: { select: { id: true, name: true, company: true } },
+              _count: { select: { applications: true } },
+            },
+          })
+        : [];
+
+      return paginatedResponse(res, { jobs }, {
+        total,
+        page: parseInt(page),
+        limit: take,
+        totalPages: Math.ceil(total / take),
+      });
+    }
 
     const [jobs, total] = await Promise.all([
       prisma.job.findMany({
@@ -247,10 +306,30 @@ const updateJobStatus = async (req, res, next) => {
   }
 };
 
+// GET /api/jobs/filters - returns distinct companies for filter dropdowns
+const getJobFilters = async (req, res, next) => {
+  try {
+    const isHR = req.user?.role === "HR";
+    const where = isHR ? { hrId: req.user.id } : { status: "ACTIVE" };
+
+    const jobs = await prisma.job.findMany({
+      where,
+      select: { hr: { select: { company: true } } },
+    });
+
+    const companies = [...new Set(jobs.map(j => j.hr?.company).filter(Boolean))].sort();
+
+    return successResponse(res, { companies });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   createJob,
   getJobs,
   getJobById,
+  getJobFilters,
   updateJob,
   deleteJob,
   updateJobStatus,

@@ -11,7 +11,16 @@ const { errorHandler, notFound } = require("./middleware/errorHandler");
 const app = express();
 
 // ─── Security & Middleware ──────────────────────────────────────────────────
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+        "img-src": ["'self'", "data:", "*.amazonaws.com"],
+      },
+    },
+  })
+);
 app.use(
   cors({
     origin: process.env.FRONTEND_URL || "*",
