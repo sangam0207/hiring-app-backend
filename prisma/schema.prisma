@@ -38,19 +38,38 @@ enum ExperienceLevel {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  password     String
-  name         String
-  role         UserRole
-  company      String?  // For HR users
-  phone        String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              String   @id @default(uuid())
+  email           String   @unique
+  password        String
+  name            String
+  role            UserRole
+  company         String?  // For HR users
+  phone           String?
+
+  // Profile fields (primarily for candidates)
+  headline        String?          // e.g. "Senior React Developer"
+  summary         String?  @db.Text
+  location        String?
+  currentCompany  String?
+  currentRole     String?
+  totalExperience Float?           // years
+  skills          String[]
+  education       Json?            // [{degree, institution, year, field}]
+  workExperience  Json?            // [{company, role, duration, description}]
+  certifications  String[]
+  languages       String[]
+  linkedinUrl     String?
+  portfolioUrl    String?
+  profileImageUrl String?
+  coverImageUrl   String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   // Relations
   postedJobs   Job[]          @relation("HRJobs")
   applications Application[]  @relation("CandidateApplications")
+  resumes      Resume[]       @relation("UserResumes")
 
   @@map("users")
 }
@@ -86,6 +105,8 @@ model Application {
   coverLetter     String?           @db.Text
   resumeUrl       String            // Path/URL to uploaded resume
   resumeFileName  String
+  resumeId        String?           // Reference to saved resume (if used)
+  resume          Resume?           @relation(fields: [resumeId], references: [id])
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
@@ -135,4 +156,18 @@ model ParsedResume {
   updatedAt           DateTime    @updatedAt
 
   @@map("parsed_resumes")
+}
+
+model Resume {
+  id           String        @id @default(uuid())
+  userId       String
+  user         User          @relation("UserResumes", fields: [userId], references: [id], onDelete: Cascade)
+  fileName     String
+  fileUrl      String
+  isDefault    Boolean       @default(false)
+  createdAt    DateTime      @default(now())
+
+  applications Application[]
+
+  @@map("resumes")
 }

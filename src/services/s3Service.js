@@ -113,4 +113,22 @@ function extractS3KeyFromUrl(url) {
   }
 }
 
-module.exports = { uploadResume, deleteResume, getSignedUrl, fetchFileAsBuffer };
+/**
+ * Upload an image (profile photo or cover) to S3
+ */
+async function uploadImage(fileBuffer, originalName, mimetype) {
+  const fileExtension = mime.extension(mimetype) || "png";
+  const key = `images/${Date.now()}-${Math.round(Math.random() * 1e9)}.${fileExtension}`;
+
+  const params = {
+    Bucket: process.env.AWS_BUCKET,
+    Key: key,
+    Body: fileBuffer,
+    ContentType: mimetype || "image/png",
+  };
+
+  const data = await s3.upload(params).promise();
+  return data.Location;
+}
+
+module.exports = { uploadResume, deleteResume, getSignedUrl, fetchFileAsBuffer, uploadImage };
