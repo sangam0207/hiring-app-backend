@@ -1,16 +1,19 @@
 const express = require("express");
 const router = express.Router();
 
-const { authenticate, requireHR, requireCandidate } = require("../middleware/auth");
+const {
+  authenticate,
+  requireHR,
+  requireCandidate,
+} = require("../middleware/auth");
 const upload = require("../config/multer");
-const { imageUpload } = require("../config/multer");
 
 // Controllers
 const authCtrl = require("../controllers/authController");
 const jobCtrl = require("../controllers/jobController");
 const applicationCtrl = require("../controllers/applicationController");
 const dashboardCtrl = require("../controllers/dashboardController");
-const resumeCtrl = require("../controllers/resumeController");
+const chatbotCtrl = require("../controllers/chatbotController");
 
 // ─── Auth Routes ───────────────────────────────────────────────────────────────
 const authRouter = express.Router();
@@ -18,9 +21,6 @@ authRouter.post("/register", authCtrl.register);
 authRouter.post("/login", authCtrl.login);
 authRouter.get("/me", authenticate, authCtrl.getMe);
 authRouter.put("/me", authenticate, authCtrl.updateProfile);
-authRouter.post("/upload-profile-image", authenticate, imageUpload.single("image"), authCtrl.uploadProfileImage);
-authRouter.post("/upload-cover-image", authenticate, imageUpload.single("image"), authCtrl.uploadCoverImage);
-authRouter.post("/autofill-resume", authenticate, requireCandidate, upload.single("resume"), authCtrl.autofillResume);
 
 // ─── Job Routes ────────────────────────────────────────────────────────────────
 const jobRouter = express.Router();
@@ -29,23 +29,27 @@ const jobRouter = express.Router();
 jobRouter.post("/", authenticate, requireHR, jobCtrl.createJob);
 jobRouter.put("/:id", authenticate, requireHR, jobCtrl.updateJob);
 jobRouter.delete("/:id", authenticate, requireHR, jobCtrl.deleteJob);
-jobRouter.patch("/:id/status", authenticate, requireHR, jobCtrl.updateJobStatus);
+jobRouter.patch(
+  "/:id/status",
+  authenticate,
+  requireHR,
+  jobCtrl.updateJobStatus,
+);
 
 // Shared - HR sees their jobs; candidates see active jobs
 jobRouter.get("/", authenticate, jobCtrl.getJobs);
-jobRouter.get("/filters", authenticate, jobCtrl.getJobFilters);
 jobRouter.get("/:id", authenticate, jobCtrl.getJobById);
 
 // ─── Application Routes ────────────────────────────────────────────────────────
 const applicationRouter = express.Router();
 
-// Candidate: apply to a job (file upload optional if using saved resumeId)
+// Candidate: apply to a job
 applicationRouter.post(
   "/:jobId/apply",
   authenticate,
   requireCandidate,
   upload.single("resume"),
-  applicationCtrl.applyToJob
+  applicationCtrl.applyToJob,
 );
 
 // Candidate: view own applications
@@ -53,7 +57,7 @@ applicationRouter.get(
   "/my",
   authenticate,
   requireCandidate,
-  applicationCtrl.getMyApplications
+  applicationCtrl.getMyApplications,
 );
 
 // HR: view all applications for a job
@@ -61,7 +65,7 @@ applicationRouter.get(
   "/job/:jobId",
   authenticate,
   requireHR,
-  applicationCtrl.getApplicationsByJob
+  applicationCtrl.getApplicationsByJob,
 );
 
 // HR: update application status
@@ -69,7 +73,7 @@ applicationRouter.patch(
   "/:applicationId/status",
   authenticate,
   requireHR,
-  applicationCtrl.updateApplicationStatus
+  applicationCtrl.updateApplicationStatus,
 );
 
 // HR: trigger manual resume re-parse
@@ -77,43 +81,43 @@ applicationRouter.post(
   "/:applicationId/parse",
   authenticate,
   requireHR,
-  applicationCtrl.triggerResumeParse
+  applicationCtrl.triggerResumeParse,
 );
 
 // Shared: view single application (HR or candidate owner)
 applicationRouter.get(
   "/:applicationId",
   authenticate,
-  applicationCtrl.getApplicationById
+  applicationCtrl.getApplicationById,
 );
 
 // ─── Dashboard Routes ──────────────────────────────────────────────────────────
 const dashboardRouter = express.Router();
-dashboardRouter.get("/hr", authenticate, requireHR, dashboardCtrl.getHRDashboard);
+dashboardRouter.get(
+  "/hr",
+  authenticate,
+  requireHR,
+  dashboardCtrl.getHRDashboard,
+);
 dashboardRouter.get(
   "/hr/jobs/:jobId/report",
   authenticate,
   requireHR,
-  dashboardCtrl.getJobReport
+  dashboardCtrl.getJobReport,
 );
 
-// ─── Resume Routes ──────────────────────────────────────────────────────────────
-const resumeRouter = express.Router();
-resumeRouter.post("/upload", authenticate, requireCandidate, upload.single("resume"), resumeCtrl.uploadUserResume);
-resumeRouter.get("/", authenticate, requireCandidate, resumeCtrl.getUserResumes);
-resumeRouter.delete("/:id", authenticate, requireCandidate, resumeCtrl.deleteUserResume);
-resumeRouter.patch("/:id/default", authenticate, requireCandidate, resumeCtrl.setDefaultResume);
-
-// ─── User Profile Routes (public profile for HR) ───────────────────────────────
-const userRouter = express.Router();
-userRouter.get("/:id/profile", authenticate, authCtrl.getPublicProfile);
+// ─── Chatbot Routes ────────────────────────────────────────────────────────────
+// Public — no auth required (the chatbot is a standalone resume builder tool)
+const chatbotRouter = express.Router();
+chatbotRouter.post("/start", chatbotCtrl.startSession);
+chatbotRouter.post("/message", chatbotCtrl.handleMessage);
+chatbotRouter.delete("/session/:sessionId", chatbotCtrl.resetSession);
 
 // ─── Mount all routers ─────────────────────────────────────────────────────────
 router.use("/auth", authRouter);
 router.use("/jobs", jobRouter);
 router.use("/applications", applicationRouter);
 router.use("/dashboard", dashboardRouter);
-router.use("/resumes", resumeRouter);
-router.use("/users", userRouter);
+router.use("/chatbot", chatbotRouter);
 
 module.exports = router;
