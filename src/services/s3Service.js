@@ -56,8 +56,9 @@ async function deleteResume(url) {
  * Generate a signed URL to securely access a private S3 file
  * @param {string} url - Full S3 URL
  * @param {number} expiresIn - Seconds until expiry (default: 1 hour)
+ * @param {Object} overrides - Additional getObject params (e.g. ResponseContentDisposition)
  */
-function getSignedUrl(url, expiresIn = 3600) {
+function getSignedUrl(url, expiresIn = 3600, overrides = {}) {
   try {
     const key = extractS3KeyFromUrl(url);
     if (!key) return null;
@@ -66,6 +67,7 @@ function getSignedUrl(url, expiresIn = 3600) {
       Bucket: process.env.AWS_BUCKET,
       Key: key,
       Expires: expiresIn,
+      ...overrides,
     });
   } catch (error) {
     console.error("[S3] Signed URL error:", error.message);
@@ -131,4 +133,10 @@ async function uploadImage(fileBuffer, originalName, mimetype) {
   return data.Location;
 }
 
-module.exports = { uploadResume, deleteResume, getSignedUrl, fetchFileAsBuffer, uploadImage };
+module.exports = {
+  uploadResume,
+  deleteResume,
+  getSignedUrl,
+  fetchFileAsBuffer,
+  uploadImage,
+};
