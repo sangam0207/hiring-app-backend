@@ -14,6 +14,7 @@ const jobCtrl = require("../controllers/jobController");
 const applicationCtrl = require("../controllers/applicationController");
 const dashboardCtrl = require("../controllers/dashboardController");
 const chatbotCtrl = require("../controllers/chatbotController");
+const jdChatbotCtrl = require("../controllers/jdChatbotController");
 
 // ─── Auth Routes ───────────────────────────────────────────────────────────────
 const authRouter = express.Router();
@@ -113,11 +114,17 @@ chatbotRouter.post("/start", chatbotCtrl.startSession);
 chatbotRouter.post("/message", chatbotCtrl.handleMessage);
 chatbotRouter.delete("/session/:sessionId", chatbotCtrl.resetSession);
 
+const jdChatbotRouter = express.Router();
+jdChatbotRouter.post("/start", jdChatbotCtrl.startSession);
+jdChatbotRouter.post("/message", jdChatbotCtrl.handleMessage);
+jdChatbotRouter.delete("/session/:sessionId", jdChatbotCtrl.resetSession);
+
 // ─── Mount all routers ─────────────────────────────────────────────────────────
 router.use("/auth", authRouter);
 router.use("/jobs", jobRouter);
 router.use("/applications", applicationRouter);
 router.use("/dashboard", dashboardRouter);
+router.use("/chatbot/jd", jdChatbotRouter);
 router.use("/chatbot", chatbotRouter);
 
 module.exports = router;
