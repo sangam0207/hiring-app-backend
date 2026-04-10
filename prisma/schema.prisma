@@ -24,6 +24,8 @@ enum ApplicationStatus {
   SCREENING
   SHORTLISTED
   INTERVIEW_SCHEDULED
+  AI_INTERVIEW_PENDING
+  AI_INTERVIEW_COMPLETED
   INTERVIEWED
   SELECTED
   REJECTED
@@ -35,6 +37,13 @@ enum ExperienceLevel {
   MID
   SENIOR
   LEAD
+}
+
+enum AIInterviewStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  EVALUATED
 }
 
 model User {
@@ -70,6 +79,7 @@ model User {
   postedJobs   Job[]          @relation("HRJobs")
   applications Application[]  @relation("CandidateApplications")
   resumes      Resume[]       @relation("UserResumes")
+  notifications Notification[] @relation("UserNotifications")
 
   @@map("users")
 }
@@ -84,8 +94,9 @@ model Job {
   location        String?
   salary          String?
   jobType         String?         // Full-time, Part-time, Remote
-  status          JobStatus       @default(DRAFT)
-  hrId            String
+  status              JobStatus       @default(DRAFT)
+  screeningQuestions   Json?           // Cached AI-generated screening questions
+  hrId                String
   hr              User            @relation("HRJobs", fields: [hrId], references: [id], onDelete: Cascade)
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
@@ -105,6 +116,7 @@ model Application {
   coverLetter     String?           @db.Text
   resumeUrl       String            // Path/URL to uploaded resume
   resumeFileName  String
+  screeningAnswers Json?             // [{question, answer}] from screening step
   resumeId        String?           // Reference to saved resume (if used)
   resume          Resume?           @relation(fields: [resumeId], references: [id])
   createdAt       DateTime          @default(now())
@@ -113,8 +125,60 @@ model Application {
   // Resume Parsing Results
   parsedResume    ParsedResume?
 
+  // Interview scheduling (meeting-link based)
+  interview       Interview?
+
+  // AI Interview
+  aiInterview     AIInterview?
+
   @@unique([jobId, candidateId])
   @@map("applications")
+}
+
+model Interview {
+  id              String      @id @default(uuid())
+  applicationId   String      @unique
+  application     Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  interviewDate   String      // "YYYY-MM-DD"
+  interviewTime   String      // "HH:mm"
+  duration        Int         @default(30) // minutes
+  meetingLink     String
+  notes           String?     @db.Text
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@map("interviews")
+}
+
+model AIInterview {
+  id              String             @id @default(uuid())
+  applicationId   String             @unique
+  application     Application        @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  status          AIInterviewStatus  @default(PENDING)
+  deadline        DateTime?          // 2 days from trigger
+
+  // AI-generated questions
+  questions       Json               // ["Q1", "Q2", "Q3", "Q4", "Q5"]
+
+  // Candidate answers (matching questions by index)
+  answers         Json?              // ["A1", "A2", "A3", "A4", "A5"]
+
+  // AI evaluation results
+  evaluation      Json?              // [{question, answer, score, feedback}]
+  overallScore    Float?             // 0-100
+  aiSummary       String?            @db.Text
+  strengths       String[]
+  improvements    String[]
+
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@map("ai_interviews")
 }
 
 model ParsedResume {
@@ -143,6 +207,7 @@ model ParsedResume {
   matchScore          Float       // 0-100
   skillMatchScore     Float       // 0-100
   experienceScore     Float       // 0-100
+  screeningScore      Float?      // 0-100 (AI evaluation of screening answers)
   overallScore        Float       // 0-100
 
   // AI Insights
@@ -170,4 +235,17 @@ model Resume {
   applications Application[]
 
   @@map("resumes")
+}
+
+model Notification {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  applicationId String?
+  type          String   // e.g. "STATUS_CHANGE", "AI_INTERVIEW_READY"
+  message       String
+  isRead        Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@map("notifications")
 }

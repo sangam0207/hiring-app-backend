@@ -4,13 +4,17 @@ const openai = require("../config/openai");
  * Parse resume text using OpenAI and match against job requirements
  * Returns structured candidate data + matching scores
  */
-const parseResumeWithAI = async (resumeText, job) => {
+const parseResumeWithAI = async (resumeText, job, screeningAnswers = null) => {
   const systemPrompt = `You are an expert HR analyst and resume parser. Your job is to:
 1. Extract structured information from resumes
 2. Analyze the candidate's fit for a specific job
 3. Provide matching scores and insights
 
 Always respond with valid JSON only. No markdown, no explanation outside JSON.`;
+
+  const screeningSection = screeningAnswers?.length > 0
+    ? `\n=== SCREENING ANSWERS ===\n${screeningAnswers.map((qa, i) => `Q${i+1}: ${qa.question}\nA${i+1}: ${qa.answer}`).join("\n\n")}\n`
+    : "";
 
   const userPrompt = `Analyze this resume against the job requirements and return a JSON object.
 
@@ -23,7 +27,7 @@ Experience Level: ${job.experienceLevel}
 
 === RESUME TEXT ===
 ${resumeText}
-
+${screeningSection}
 === REQUIRED JSON RESPONSE FORMAT ===
 {
   "candidateName": "string or null",
@@ -68,6 +72,8 @@ ${resumeText}
   "matchScore": number (0-100, overall match percentage),
   "skillMatchScore": number (0-100, how well skills match required skills),
   "experienceScore": number (0-100, how experience level matches),
+  "screeningScore": number or null (0-100, quality of screening answers — null if no screening answers provided),
+  "screeningEvaluation": [{"question": "...", "answer": "...", "rating": "good/average/poor", "remark": "brief evaluation"}] or null,
   "overallScore": number (0-100, weighted final score),
 
   "strengths": ["strength1", "strength2", "strength3"],
@@ -81,7 +87,8 @@ Scoring Guidelines:
 - skillMatchScore: Count how many required skills the candidate has vs total required skills
 - experienceScore: Rate based on required experience level (ENTRY=0-1yr, JUNIOR=1-3yr, MID=3-5yr, SENIOR=5-8yr, LEAD=8+yr)
 - matchScore: Combination of skills, experience, and relevance
-- overallScore: Weighted average (skills 40%, experience 30%, match 30%)
+- screeningScore: Evaluate screening answers for quality, relevance, and honesty. Rate salary expectations reasonableness, notice period, and role-specific answers. null if no screening answers.
+- overallScore: Weighted average — if screening answers exist: (skills 30%, experience 25%, match 25%, screening 20%). Otherwise: (skills 40%, experience 30%, match 30%)
 - isRecommended: true if overallScore >= 65`;
 
   const response = await openai.chat.completions.create({
@@ -126,6 +133,8 @@ Scoring Guidelines:
     matchScore: clamp(parsed.matchScore),
     skillMatchScore: clamp(parsed.skillMatchScore),
     experienceScore: clamp(parsed.experienceScore),
+    screeningScore: parsed.screeningScore != null ? clamp(parsed.screeningScore) : null,
+    screeningEvaluation: Array.isArray(parsed.screeningEvaluation) ? parsed.screeningEvaluation : null,
     overallScore: clamp(parsed.overallScore),
     strengths: Array.isArray(parsed.strengths) ? parsed.strengths : [],
     gaps: Array.isArray(parsed.gaps) ? parsed.gaps : [],

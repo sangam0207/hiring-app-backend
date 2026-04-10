@@ -11,6 +11,8 @@ const jobCtrl = require("../controllers/jobController");
 const applicationCtrl = require("../controllers/applicationController");
 const dashboardCtrl = require("../controllers/dashboardController");
 const resumeCtrl = require("../controllers/resumeController");
+const aiInterviewCtrl = require("../controllers/aiInterviewController");
+const notificationRouter = require("./notificationRoutes");
 
 // ─── Auth Routes ───────────────────────────────────────────────────────────────
 const authRouter = express.Router();
@@ -34,7 +36,9 @@ jobRouter.patch("/:id/status", authenticate, requireHR, jobCtrl.updateJobStatus)
 // Shared - HR sees their jobs; candidates see active jobs
 jobRouter.get("/", authenticate, jobCtrl.getJobs);
 jobRouter.get("/filters", authenticate, jobCtrl.getJobFilters);
+jobRouter.get("/recommended", authenticate, requireCandidate, jobCtrl.getRecommendedJobs);
 jobRouter.get("/:id", authenticate, jobCtrl.getJobById);
+jobRouter.get("/:jobId/screening-questions", authenticate, jobCtrl.getScreeningQuestions);
 
 // ─── Application Routes ────────────────────────────────────────────────────────
 const applicationRouter = express.Router();
@@ -72,6 +76,14 @@ applicationRouter.patch(
   applicationCtrl.updateApplicationStatus
 );
 
+// HR: schedule interview for an application
+applicationRouter.post(
+  "/:applicationId/schedule-interview",
+  authenticate,
+  requireHR,
+  applicationCtrl.scheduleInterview
+);
+
 // HR: trigger manual resume re-parse
 applicationRouter.post(
   "/:applicationId/parse",
@@ -96,6 +108,7 @@ dashboardRouter.get(
   requireHR,
   dashboardCtrl.getJobReport
 );
+dashboardRouter.get("/candidate", authenticate, requireCandidate, dashboardCtrl.getCandidateDashboard);
 
 // ─── Resume Routes ──────────────────────────────────────────────────────────────
 const resumeRouter = express.Router();
@@ -108,6 +121,40 @@ resumeRouter.patch("/:id/default", authenticate, requireCandidate, resumeCtrl.se
 const userRouter = express.Router();
 userRouter.get("/:id/profile", authenticate, authCtrl.getPublicProfile);
 
+// ─── AI Interview Routes ────────────────────────────────────────────────────────
+const aiInterviewRouter = express.Router();
+
+// HR: trigger AI interview for a candidate
+aiInterviewRouter.post(
+  "/:applicationId/trigger",
+  authenticate,
+  requireHR,
+  aiInterviewCtrl.triggerAIInterview
+);
+
+// Candidate: start the AI interview (get questions)
+aiInterviewRouter.post(
+  "/:applicationId/start",
+  authenticate,
+  requireCandidate,
+  aiInterviewCtrl.startAIInterview
+);
+
+// Candidate: submit answers
+aiInterviewRouter.post(
+  "/:applicationId/submit",
+  authenticate,
+  requireCandidate,
+  aiInterviewCtrl.submitAIInterview
+);
+
+// Shared: view AI interview details (HR or candidate)
+aiInterviewRouter.get(
+  "/:applicationId",
+  authenticate,
+  aiInterviewCtrl.getAIInterview
+);
+
 // ─── Mount all routers ─────────────────────────────────────────────────────────
 router.use("/auth", authRouter);
 router.use("/jobs", jobRouter);
@@ -115,5 +162,7 @@ router.use("/applications", applicationRouter);
 router.use("/dashboard", dashboardRouter);
 router.use("/resumes", resumeRouter);
 router.use("/users", userRouter);
+router.use("/ai-interview", aiInterviewRouter);
+router.use("/notifications", notificationRouter);
 
 module.exports = router;

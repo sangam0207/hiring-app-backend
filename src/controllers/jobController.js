@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const openai = require("../config/openai");
 const { successResponse, errorResponse, paginatedResponse } = require("../utils/response");
 
 // POST /api/jobs - HR creates a job
@@ -325,6 +326,198 @@ const getJobFilters = async (req, res, next) => {
   }
 };
 
+// GET /api/jobs/:jobId/screening-questions - Generate/return screening questions for a job
+const getScreeningQuestions = async (req, res, next) => {
+  try {
+    const { jobId } = req.params;
+
+    const job = await prisma.job.findUnique({ where: { id: jobId } });
+    if (!job) return errorResponse(res, "Job not found.", 404);
+
+    // Return cached questions if they exist
+    if (job.screeningQuestions && Array.isArray(job.screeningQuestions) && job.screeningQuestions.length > 0) {
+      return successResponse(res, { questions: job.screeningQuestions });
+    }
+
+    // Fixed standard HR questions
+    const fixedQuestions = [
+      { id: "q1", question: "What is your current CTC / salary?", type: "fixed", inputType: "text" },
+      { id: "q2", question: "What is your expected CTC / salary?", type: "fixed", inputType: "text" },
+      { id: "q3", question: "What is your notice period?", type: "fixed", inputType: "text" },
+    ];
+
+    // Generate role-specific questions via OpenAI
+    let aiQuestions = [];
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        temperature: 0.1,
+        max_tokens: 500,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: "You are an expert HR recruiter. Generate screening questions for job applicants. Return JSON only.",
+          },
+          {
+            role: "user",
+            content: `Generate exactly 2 short screening questions for this job posting. Questions should be specific to the role and help HR quickly assess candidate fit.
+
+Job Title: ${job.title}
+Description: ${job.description?.slice(0, 500)}
+Required Skills: ${job.requiredSkills.join(", ")}
+Experience Level: ${job.experienceLevel}
+
+Return JSON in this format:
+{
+  "questions": [
+    { "question": "...", "inputType": "textarea" },
+    { "question": "...", "inputType": "textarea" }
+  ]
+}
+
+Keep questions concise (1 sentence each). Focus on motivation, relevant experience, or key skills.`,
+          },
+        ],
+      });
+
+      const parsed = JSON.parse(response.choices[0].message.content);
+      if (parsed.questions && Array.isArray(parsed.questions)) {
+        aiQuestions = parsed.questions.slice(0, 2).map((q, i) => ({
+          id: `ai${i + 1}`,
+          question: q.question,
+          type: "ai",
+          inputType: q.inputType || "textarea",
+        }));
+      }
+    } catch (err) {
+      console.error("[Screening] OpenAI error:", err.message);
+      // Fallback AI questions if OpenAI fails
+      aiQuestions = [
+        { id: "ai1", question: "Why are you interested in this role?", type: "ai", inputType: "textarea" },
+        { id: "ai2", question: `What relevant experience do you have for the ${job.title} position?`, type: "ai", inputType: "textarea" },
+      ];
+    }
+
+    const allQuestions = [...fixedQuestions, ...aiQuestions];
+
+    // Cache questions on the job record
+    await prisma.job.update({
+      where: { id: jobId },
+      data: { screeningQuestions: allQuestions },
+    });
+
+    return successResponse(res, { questions: allQuestions });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/jobs/recommended - AI-powered job matching for candidates
+const getRecommendedJobs = async (req, res, next) => {
+  try {
+    // Get candidate profile
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: {
+        name: true, headline: true, summary: true, skills: true,
+        totalExperience: true, currentRole: true, currentCompany: true,
+        education: true, workExperience: true, location: true,
+      },
+    });
+
+    if (!user || (!user.skills?.length && !user.headline && !user.summary)) {
+      return errorResponse(res, "Please complete your profile first (skills, headline) for AI matching.", 400);
+    }
+
+    // Get active jobs
+    const jobs = await prisma.job.findMany({
+      where: { status: "ACTIVE" },
+      select: {
+        id: true, title: true, description: true, requirements: true,
+        requiredSkills: true, experienceLevel: true, location: true,
+        salary: true, jobType: true, createdAt: true,
+        hr: { select: { company: true } },
+        _count: { select: { applications: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 50, // limit to 50 most recent for performance
+    });
+
+    if (jobs.length === 0) {
+      return successResponse(res, { recommendations: [] });
+    }
+
+    // Build candidate profile summary
+    const profileSummary = [
+      user.headline && `Headline: ${user.headline}`,
+      user.currentRole && `Current Role: ${user.currentRole}`,
+      user.currentCompany && `Current Company: ${user.currentCompany}`,
+      user.totalExperience && `Experience: ${user.totalExperience} years`,
+      user.skills?.length && `Skills: ${user.skills.join(", ")}`,
+      user.location && `Location: ${user.location}`,
+      user.summary && `Summary: ${user.summary.slice(0, 300)}`,
+    ].filter(Boolean).join("\n");
+
+    // Build jobs list for AI
+    const jobsList = jobs.map((j, i) => (
+      `[${i}] "${j.title}" at ${j.hr?.company || "Unknown"} | Skills: ${j.requiredSkills.join(", ")} | Level: ${j.experienceLevel} | ${j.location || "Remote"}`
+    )).join("\n");
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0.1,
+      max_tokens: 1000,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content: "You are an expert job matching AI. Match candidates to jobs based on skills, experience, and career trajectory. Return JSON only.",
+        },
+        {
+          role: "user",
+          content: `Match this candidate profile against the job listings and return the top matches.
+
+=== CANDIDATE PROFILE ===
+${profileSummary}
+
+=== AVAILABLE JOBS ===
+${jobsList}
+
+Return JSON:
+{
+  "matches": [
+    { "index": number (job index from list), "matchPercent": number (0-100), "reason": "1 sentence why this is a good match" }
+  ]
+}
+
+Rules:
+- Return up to 6 best matching jobs, sorted by matchPercent descending
+- Only include jobs with matchPercent >= 40
+- Be realistic about matching — consider skills overlap, experience level fit, and career relevance
+- matchPercent should reflect genuine fit, not just keyword overlap`,
+        },
+      ],
+    });
+
+    const parsed = JSON.parse(response.choices[0].message.content);
+    const matches = (parsed.matches || [])
+      .filter(m => m.index >= 0 && m.index < jobs.length && m.matchPercent >= 40)
+      .sort((a, b) => b.matchPercent - a.matchPercent)
+      .slice(0, 6)
+      .map(m => ({
+        job: jobs[m.index],
+        matchPercent: Math.round(m.matchPercent),
+        reason: m.reason,
+      }));
+
+    return successResponse(res, { recommendations: matches });
+  } catch (error) {
+    console.error("[Job Matching] Error:", error.message);
+    next(error);
+  }
+};
+
 module.exports = {
   createJob,
   getJobs,
@@ -333,4 +526,6 @@ module.exports = {
   updateJob,
   deleteJob,
   updateJobStatus,
+  getScreeningQuestions,
+  getRecommendedJobs,
 };

@@ -3,12 +3,14 @@ const { uploadResume, fetchFileAsBuffer, deleteResume } = require("../services/s
 const { extractTextFromResume } = require("../utils/resumeExtractor");
 const { parseResumeWithAI } = require("../services/resumeParserService");
 const { successResponse, errorResponse, paginatedResponse } = require("../utils/response");
+const { sendInterviewEmail } = require("../services/emailService");
+const notificationService = require("../services/notificationService");
 
 // POST /api/applications/:jobId/apply - Candidate applies with resume
 const applyToJob = async (req, res, next) => {
   try {
     const { jobId } = req.params;
-    const { coverLetter, resumeId } = req.body;
+    const { coverLetter, resumeId, screeningAnswers } = req.body;
     const candidateId = req.user.id;
 
     // Must provide either a file upload or a saved resumeId
@@ -65,6 +67,16 @@ const applyToJob = async (req, res, next) => {
     }
 
     // Create application
+    // Parse screeningAnswers if sent as string (FormData)
+    let parsedScreeningAnswers = null;
+    if (screeningAnswers) {
+      try {
+        parsedScreeningAnswers = typeof screeningAnswers === "string"
+          ? JSON.parse(screeningAnswers)
+          : screeningAnswers;
+      } catch { parsedScreeningAnswers = null; }
+    }
+
     const application = await prisma.application.create({
       data: {
         jobId,
@@ -73,6 +85,7 @@ const applyToJob = async (req, res, next) => {
         resumeUrl,
         resumeFileName,
         resumeId: savedResumeId,
+        screeningAnswers: parsedScreeningAnswers,
         status: "APPLIED",
       },
       include: {
@@ -81,12 +94,13 @@ const applyToJob = async (req, res, next) => {
       },
     });
 
-    // Trigger async resume parsing
+    // Trigger async resume parsing (include screening answers for AI evaluation)
     parseResumeInBackground(
       application.id,
       fileBuffer,
       fileMimetype,
-      job
+      job,
+      parsedScreeningAnswers
     ).catch((err) =>
       console.error(`Resume parsing failed for application ${application.id}:`, err)
     );
@@ -109,7 +123,7 @@ const applyToJob = async (req, res, next) => {
  * @param {string} mimetype
  * @param {object} job         - Full job object for context
  */
-const parseResumeInBackground = async (applicationId, fileBuffer, mimetype, job) => {
+const parseResumeInBackground = async (applicationId, fileBuffer, mimetype, job, screeningAnswers = null) => {
   try {
     console.log(`[Resume Parser] Starting for application: ${applicationId}`);
 
@@ -124,19 +138,35 @@ const parseResumeInBackground = async (applicationId, fileBuffer, mimetype, job)
       throw new Error("Could not extract meaningful text from resume.");
     }
 
-    // Parse with OpenAI
-    const parsedData = await parseResumeWithAI(resumeText, job);
+    // Parse with OpenAI (include screening answers for evaluation)
+    const parsedData = await parseResumeWithAI(resumeText, job, screeningAnswers);
 
-    // Save parsed results
+    // Save parsed results (screeningEvaluation stored alongside screening answers on application)
+    const { screeningEvaluation, ...resumeData } = parsedData;
+
     await prisma.parsedResume.create({
       data: {
         applicationId,
-        ...parsedData,
-        education: parsedData.education,
-        workExperience: parsedData.workExperience,
-        projects: parsedData.projects,
+        ...resumeData,
+        education: resumeData.education,
+        workExperience: resumeData.workExperience,
+        projects: resumeData.projects,
       },
     });
+
+    // Save screening evaluation on the application record
+    if (screeningEvaluation) {
+      await prisma.application.update({
+        where: { id: applicationId },
+        data: {
+          screeningAnswers: screeningAnswers?.map((qa, i) => ({
+            ...qa,
+            rating: screeningEvaluation[i]?.rating || null,
+            remark: screeningEvaluation[i]?.remark || null,
+          })) || undefined,
+        },
+      });
+    }
 
     const newStatus = parsedData.isRecommended ? "SHORTLISTED" : "APPLIED";
     await prisma.application.update({
@@ -235,6 +265,7 @@ const getApplicationsByJob = async (req, res, next) => {
               overallScore: true,
               skillMatchScore: true,
               matchScore: true,
+              screeningScore: true,
               extractedSkills: true,
               totalExperience: true,
               currentRole: true,
@@ -243,6 +274,20 @@ const getApplicationsByJob = async (req, res, next) => {
               strengths: true,
               gaps: true,
               parsedAt: true,
+            },
+          },
+          interview: {
+            select: {
+              interviewDate: true,
+              interviewTime: true,
+              duration: true,
+              meetingLink: true,
+            },
+          },
+          aiInterview: {
+            select: {
+              status: true,
+              overallScore: true,
             },
           },
         },
@@ -276,12 +321,15 @@ const getApplicationById = async (req, res, next) => {
             requiredSkills: true,
             experienceLevel: true,
             hrId: true,
+            hr: { select: { company: true } },
           },
         },
         candidate: {
           select: { id: true, name: true, email: true, phone: true },
         },
         parsedResume: true,
+        interview: true,
+        aiInterview: true,
       },
     });
 
@@ -313,6 +361,8 @@ const updateApplicationStatus = async (req, res, next) => {
       "APPLIED",
       "SCREENING",
       "SHORTLISTED",
+      "AI_INTERVIEW_PENDING",
+      "AI_INTERVIEW_COMPLETED",
       "INTERVIEW_SCHEDULED",
       "INTERVIEWED",
       "SELECTED",
@@ -336,10 +386,19 @@ const updateApplicationStatus = async (req, res, next) => {
       data: { status },
       include: {
         candidate: { select: { id: true, name: true, email: true } },
+        job: { select: { title: true } },
         parsedResume: {
           select: { overallScore: true, isRecommended: true },
         },
       },
+    });
+
+    // Notify candidate
+    await notificationService.createNotification({
+      userId: updated.candidateId,
+      applicationId: updated.id,
+      type: "STATUS_CHANGE",
+      message: `Your application for ${updated.job.title} is now ${status.replace("_", " ")}.`,
     });
 
     return successResponse(
@@ -383,17 +442,138 @@ const getMyApplications = async (req, res, next) => {
               aiSummary: true,
             },
           },
+          interview: {
+            select: {
+              interviewDate: true,
+              interviewTime: true,
+              duration: true,
+              meetingLink: true,
+              notes: true,
+            },
+          },
+          aiInterview: {
+            select: {
+              deadline: true,
+              status: true,
+              overallScore: true,
+              startedAt: true,
+            }
+          }
         },
       }),
       prisma.application.count({ where: { candidateId: req.user.id } }),
     ]);
 
-    return paginatedResponse(res, { applications }, {
+    // Add computed expiry info for AI interviews
+    const now = new Date();
+    const enrichedApplications = applications.map((app) => {
+      if (app.aiInterview && app.aiInterview.deadline) {
+        const deadline = new Date(app.aiInterview.deadline);
+        const isExpired = now > deadline;
+        const timeRemainingMs = isExpired ? 0 : deadline.getTime() - now.getTime();
+        return {
+          ...app,
+          aiInterview: {
+            ...app.aiInterview,
+            isExpired,
+            timeRemainingMs,
+          },
+        };
+      }
+      return app;
+    });
+
+    return paginatedResponse(res, { applications: enrichedApplications }, {
       total,
       page: parseInt(page),
       limit: take,
       totalPages: Math.ceil(total / take),
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/applications/:applicationId/schedule-interview - HR schedules interview
+const scheduleInterview = async (req, res, next) => {
+  try {
+    const { applicationId } = req.params;
+    const { interviewDate, interviewTime, duration, meetingLink, notes } = req.body;
+
+    // Validate required fields
+    if (!interviewDate || !interviewTime || !meetingLink) {
+      return errorResponse(res, "Interview date, time, and meeting link are required.");
+    }
+
+    const application = await prisma.application.findUnique({
+      where: { id: applicationId },
+      include: {
+        job: { select: { hrId: true, title: true, hr: { select: { company: true } } } },
+        candidate: { select: { id: true, name: true, email: true } },
+      },
+    });
+
+    if (!application) return errorResponse(res, "Application not found.", 404);
+    if (application.job.hrId !== req.user.id) return errorResponse(res, "Access denied.", 403);
+
+    // Upsert interview (update if already exists, create if not)
+    await prisma.interview.upsert({
+      where: { applicationId },
+      update: {
+        interviewDate,
+        interviewTime,
+        duration: duration || 30,
+        meetingLink,
+        notes: notes || null,
+      },
+      create: {
+        applicationId,
+        interviewDate,
+        interviewTime,
+        duration: duration || 30,
+        meetingLink,
+        notes: notes || null,
+      },
+    });
+
+    // Update application status to INTERVIEW_SCHEDULED
+    const updated = await prisma.application.update({
+      where: { id: applicationId },
+      data: { status: "INTERVIEW_SCHEDULED" },
+      include: {
+        candidate: { select: { id: true, name: true, email: true } },
+        job: { select: { title: true } },
+        parsedResume: { select: { overallScore: true, isRecommended: true } },
+        interview: true,
+      },
+    });
+
+    // Notify candidate
+    await notificationService.createNotification({
+      userId: updated.candidateId,
+      applicationId: updated.id,
+      type: "INTERVIEW_SCHEDULED",
+      message: `An interview for ${updated.job.title} has been scheduled for ${interviewDate} at ${interviewTime}.`,
+    });
+
+    // Send email notification (fire and forget)
+    sendInterviewEmail({
+      to: application.candidate.email,
+      candidateName: application.candidate.name,
+      jobTitle: application.job.title,
+      company: application.job.hr?.company,
+      interviewDate,
+      interviewTime,
+      duration: duration || 30,
+      meetingLink,
+      notes,
+    }).catch((err) => console.error("[Schedule] Email error:", err.message));
+
+    return successResponse(
+      res,
+      { application: updated },
+      "Interview scheduled successfully."
+    );
   } catch (error) {
     next(error);
   }
@@ -406,4 +586,5 @@ module.exports = {
   getApplicationById,
   updateApplicationStatus,
   getMyApplications,
+  scheduleInterview,
 };

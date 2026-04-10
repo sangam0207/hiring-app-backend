@@ -226,4 +226,112 @@ const getJobReport = async (req, res, next) => {
   }
 };
 
-module.exports = { getHRDashboard, getJobReport };
+// GET /api/dashboard/candidate - Candidate insights dashboard
+const getCandidateDashboard = async (req, res, next) => {
+  try {
+    const candidateId = req.user.id;
+
+    const [applications, user] = await Promise.all([
+      prisma.application.findMany({
+        where: { candidateId },
+        include: {
+          job: {
+            select: { id: true, title: true, requiredSkills: true,
+              hr: { select: { company: true } } },
+          },
+          parsedResume: {
+            select: {
+              overallScore: true, skillMatchScore: true, experienceScore: true,
+              matchScore: true, screeningScore: true, extractedSkills: true,
+              gaps: true, strengths: true, isRecommended: true, parsedAt: true,
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.user.findUnique({
+        where: { id: candidateId },
+        select: { skills: true, name: true },
+      }),
+    ]);
+
+    const total = applications.length;
+    const selected = applications.filter(a => a.status === "SELECTED").length;
+    const rejected = applications.filter(a => a.status === "REJECTED").length;
+    const interviewed = applications.filter(a =>
+      ["INTERVIEW_SCHEDULED", "INTERVIEWED", "SELECTED"].includes(a.status)
+    ).length;
+    const withScores = applications.filter(a => a.parsedResume?.overallScore != null);
+    const avgScore = withScores.length > 0
+      ? Math.round(withScores.reduce((s, a) => s + a.parsedResume.overallScore, 0) / withScores.length)
+      : 0;
+
+    // Status breakdown
+    const statusBreakdown = {};
+    applications.forEach(a => {
+      statusBreakdown[a.status] = (statusBreakdown[a.status] || 0) + 1;
+    });
+
+    // Score trend (last 10 apps with scores)
+    const scoreTrend = withScores.slice(0, 10).reverse().map(a => ({
+      job: a.job?.title?.slice(0, 20) || "Job",
+      company: a.job?.hr?.company || "",
+      overall: Math.round(a.parsedResume.overallScore),
+      skills: Math.round(a.parsedResume.skillMatchScore || 0),
+      experience: Math.round(a.parsedResume.experienceScore || 0),
+      date: a.parsedResume.parsedAt,
+    }));
+
+    // Skill gap analysis: recurring gaps from rejections
+    const gapCount = {};
+    applications
+      .filter(a => a.status === "REJECTED" && a.parsedResume?.gaps?.length)
+      .forEach(a => {
+        a.parsedResume.gaps.forEach(g => {
+          gapCount[g] = (gapCount[g] || 0) + 1;
+        });
+      });
+    const topGaps = Object.entries(gapCount)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([gap, count]) => ({ gap, count }));
+
+    // Profile match: candidate skills vs most demanded skills
+    const demandCount = {};
+    applications.forEach(a => {
+      a.job?.requiredSkills?.forEach(s => {
+        demandCount[s] = (demandCount[s] || 0) + 1;
+      });
+    });
+    const topDemanded = Object.entries(demandCount)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([skill, demand]) => ({
+        skill,
+        demand,
+        hasIt: (user?.skills || []).some(
+          us => us.toLowerCase() === skill.toLowerCase()
+        ),
+      }));
+
+    return successResponse(res, {
+      overview: {
+        totalApplications: total,
+        selectionRate: total > 0 ? Math.round((selected / total) * 100) : 0,
+        avgAIScore: avgScore,
+        interviewRate: total > 0 ? Math.round((interviewed / total) * 100) : 0,
+        selected,
+        rejected,
+        interviewed,
+      },
+      statusBreakdown,
+      scoreTrend,
+      topGaps,
+      profileMatch: topDemanded,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { getHRDashboard, getJobReport, getCandidateDashboard };
