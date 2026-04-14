@@ -105,7 +105,7 @@ async function handleMessage(req, res) {
     }
 
     // Session is at terminal step (already generated a resume)
-    if (session.step > 10) {
+    if (session.step > 11) {
       const preferredName = session?.data?.name;
       const pdfUrl = session.pdfUrl
         ? getSignedUrl(session.pdfUrl, 3600) || session.pdfUrl
@@ -171,4 +171,124 @@ function resetSession(req, res) {
   }
 }
 
-module.exports = { startSession, handleMessage, resetSession };
+// ─── POST /api/chatbot/parse-resume ──────────────────────────────────────────
+
+/**
+ * Parse an uploaded or pasted resume into structured JSON.
+ *
+ * Body: { source: "text" | "file", text: string, file?: binary }
+ * Returns: { success: boolean, resume?: Object, error?: string }
+ */
+async function parseResume(req, res) {
+  try {
+    const {
+      structureResumeFromText,
+    } = require("../services/resumeStructuringService");
+    const { extractTextFromResume } = require("../utils/resumeExtractor");
+
+    const { source, text } = req.body || {};
+    const uploadedFile = req.file;
+
+    let resumeText = null;
+
+    // ──── Extract text from uploaded file or pasted text ────
+    if (source === "file" && uploadedFile) {
+      try {
+        resumeText = await extractTextFromResume(
+          uploadedFile.buffer,
+          uploadedFile.mimetype,
+        );
+      } catch (error) {
+        // Retry once for transient parser failures seen on first attempt.
+        try {
+          resumeText = await extractTextFromResume(
+            uploadedFile.buffer,
+            uploadedFile.mimetype,
+          );
+        } catch (retryError) {
+          return res.status(400).json({
+            success: false,
+            error: `Failed to extract text from PDF: ${retryError.message}`,
+          });
+        }
+      }
+    } else if (source === "text" && text) {
+      resumeText = String(text).trim();
+    }
+
+    if (!resumeText) {
+      return res.status(400).json({
+        success: false,
+        error: "Please provide a resume (upload PDF or paste text).",
+      });
+    }
+
+    // ──── Structure the text using LLM ────
+    try {
+      const structured = await structureResumeFromText(resumeText);
+      return res.status(200).json({
+        success: true,
+        resume: structured,
+      });
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        error: error.message || "Failed to parse resume.",
+      });
+    }
+  } catch (err) {
+    console.error("[Chatbot] parseResume error:", err);
+    return errorResponse(
+      res,
+      `An unexpected error occurred: ${err.message}`,
+      500,
+    );
+  }
+}
+
+// ─── POST /api/chatbot/improve-resume-section ───────────────────────────────
+
+/**
+ * Improve a single resume section using AI.
+ * Body: { section: string, sectionData: any }
+ */
+async function improveResumeSection(req, res) {
+  try {
+    const {
+      improveSectionWithAI,
+    } = require("../services/resumeStructuringService");
+    const { section, sectionData, mode } = req.body || {};
+
+    const allowed = new Set([
+      "summary",
+      "experience",
+      "skills",
+      "education",
+      "certifications",
+    ]);
+
+    if (!allowed.has(String(section || ""))) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid section requested for improvement.",
+      });
+    }
+
+    const improved = await improveSectionWithAI(section, sectionData, mode);
+    return res.status(200).json({ success: true, improved });
+  } catch (err) {
+    console.error("[Chatbot] improveResumeSection error:", err);
+    return res.status(400).json({
+      success: false,
+      error: err.message || "Failed to improve section.",
+    });
+  }
+}
+
+module.exports = {
+  startSession,
+  handleMessage,
+  resetSession,
+  parseResume,
+  improveResumeSection,
+};

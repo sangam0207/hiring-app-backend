@@ -7,31 +7,36 @@ const {
 } = require("./chatbotSessionService");
 
 const STEP = {
-  NAME: 0,
-  SECTOR: 1,
-  ROLE: 2,
-  EXPERIENCE_TYPE: 3,
-  WORK_DETAILS: 4,
-  RESPONSIBILITIES: 5,
-  SKILLS: 6,
-  EDUCATION: 7,
-  CERTIFICATIONS: 8,
-  CONTACT: 9,
-  GENERATE: 10,
+  MODE: -1, // Choose between 'create' or 'edit'
+  UPLOAD: 0, // Upload/paste resume for edit mode (only when in edit mode)
+  NAME: 1,
+  SECTOR: 2,
+  ROLE: 3,
+  EXPERIENCE_TYPE: 4,
+  WORK_DETAILS: 5,
+  RESPONSIBILITIES: 6,
+  SKILLS: 7,
+  EDUCATION: 8,
+  CERTIFICATIONS: 9,
+  CONTACT: 10,
+  GENERATE: 11,
 };
 
 const PROGRESS_MAP = {
-  0: "1/9",
-  1: "2/9",
-  2: "3/9",
-  3: "4/9",
-  4: "5/9",
-  5: "6/9",
-  6: "7/9",
-  7: "8/9",
-  8: "9/9",
+  // Edit mode: upload step (shown as 0/9 since it's not counted)
+  0: null,
+  // Create mode: NAME through CONTACT shown as 1/9 through 9/9
+  1: "1/9",
+  2: "2/9",
+  3: "3/9",
+  4: "4/9",
+  5: "5/9",
+  6: "6/9",
+  7: "7/9",
+  8: "8/9",
   9: "9/9",
-  10: null,
+  10: "9/9", // CONTACT also shows 9/9
+  11: null, // GENERATE doesn't show progress
 };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -154,6 +159,34 @@ const TONE_BY_SECTOR = {
   retail: "sales support, customer engagement, and store operations",
   "customer service": "service quality, empathy, and issue resolution",
   custom: "role-relevant practical execution, professionalism, and reliability",
+};
+
+const CERT_SUGGESTIONS_BY_SECTOR = {
+  hospitality: [
+    "Food Safety Certification",
+    "Hospitality Management Certification",
+    "Guest Service Excellence Training",
+  ],
+  aviation: [
+    "IATA Certification",
+    "Cabin Crew Training Certification",
+    "Aviation Safety Training",
+  ],
+  retail: [
+    "Retail Sales Certification",
+    "Customer Service Certification",
+    "POS System Training",
+  ],
+  "customer service": [
+    "Customer Support Certification",
+    "CRM Platform Training",
+    "Communication and Conflict Resolution Training",
+  ],
+  technical: [
+    "AWS Certification",
+    "React Certification",
+    "Google Associate Developer",
+  ],
 };
 
 function firstNameOf(session) {
@@ -403,6 +436,64 @@ function suggestSkills(session) {
   return [...new Set(merged)].slice(0, 6);
 }
 
+function fallbackCertificationSuggestions(session) {
+  const roleText =
+    `${session?.data?.targetRole || ""} ${session?.data?.customSector || ""}`.toLowerCase();
+  const sector = session?.sector;
+  const base = CERT_SUGGESTIONS_BY_SECTOR[sector] || [];
+
+  const technicalHint =
+    /developer|engineer|technical|software|frontend|backend|full.?stack|it|devops|cloud|data/.test(
+      roleText,
+    )
+      ? CERT_SUGGESTIONS_BY_SECTOR.technical
+      : [];
+
+  return [...new Set([...base, ...technicalHint])].slice(0, 3);
+}
+
+async function inferCertificationSuggestions(session) {
+  const fallback = fallbackCertificationSuggestions(session);
+  const role = String(session?.data?.targetRole || "").trim();
+  const sector = String(
+    session?.data?.customSector || sectorLabel(session) || "",
+  ).trim();
+
+  if (!role && !sector) return fallback;
+
+  try {
+    const prompt = `Suggest 4 to 6 realistic certifications for this profile.
+
+Sector: ${sector || "N/A"}
+Target role: ${role || "N/A"}
+
+Rules:
+- Keep suggestions relevant to role and sector
+- Do not include irrelevant generic items
+- Return JSON only: {"suggestions": ["...", "..."]}`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.2,
+      max_tokens: 300,
+      response_format: { type: "json_object" },
+    });
+
+    const parsed = JSON.parse(completion.choices[0].message.content || "{}");
+    const aiList = Array.isArray(parsed.suggestions)
+      ? parsed.suggestions
+          .map((item) => String(item || "").trim())
+          .filter(Boolean)
+      : [];
+
+    const merged = [...new Set([...aiList, ...fallback])];
+    return merged.slice(0, 3);
+  } catch {
+    return fallback.slice(0, 3);
+  }
+}
+
 function refineResponsibilityBullets(rawText, session) {
   const lines = String(rawText || "")
     .split(/[\n\.]/)
@@ -562,7 +653,7 @@ function validationNoteFromErrors(errors) {
 }
 
 function getWelcomeMessage() {
-  const sessionLike = { step: STEP.NAME, data: {}, snapshots: [] };
+  const sessionLike = { step: STEP.MODE, data: {}, snapshots: [] };
   return buildStepResponse(sessionLike);
 }
 
@@ -578,6 +669,40 @@ function buildStepResponse(session, extras = {}) {
   const shortName = nameOf(session);
 
   switch (session.step) {
+    case STEP.MODE:
+      return buildResponse({
+        type: "options",
+        markdown: introMarkdown(
+          "Resume Builder Assistant",
+          "Welcome! I'll help you create a professional resume.",
+          "Would you like to create a new resume from scratch, or edit and improve an existing one?",
+          acknowledgement,
+          validationNoteFromErrors(errors),
+        ),
+        options: [
+          { label: "Create New Resume", value: "create" },
+          { label: "Edit Existing Resume", value: "edit" },
+        ],
+        step: STEP.MODE,
+        replaceLast,
+        session,
+      });
+
+    case STEP.UPLOAD:
+      return buildResponse({
+        type: "resume_upload",
+        markdown: introMarkdown(
+          "Upload Your Resume",
+          "Let's improve your existing resume.",
+          "You can upload a PDF or paste your resume text below.",
+          acknowledgement,
+          validationNoteFromErrors(errors),
+        ),
+        step: STEP.UPLOAD,
+        replaceLast,
+        session,
+      });
+
     case STEP.NAME:
       return buildResponse({
         type: "input",
@@ -912,7 +1037,7 @@ function buildStepResponse(session, extras = {}) {
         markdown: introMarkdown(
           "Certifications",
           "Do you have any certifications that support your profile?",
-          "Examples: food safety, service training, IATA, first aid, CRM training, language certification.",
+          "Choose from role-aware suggestions below or add your own.",
           acknowledgement,
           validationNoteFromErrors(errors),
         ),
@@ -930,6 +1055,11 @@ function buildStepResponse(session, extras = {}) {
               placeholder: "Enter certification",
             },
           ],
+          suggestions:
+            Array.isArray(session.data.certificationSuggestions) &&
+            session.data.certificationSuggestions.length
+              ? session.data.certificationSuggestions
+              : fallbackCertificationSuggestions(session),
           addLabel: "Add more certifications",
           submitLabel: "Confirm certifications",
           initialOption:
@@ -1010,7 +1140,10 @@ async function callAIForResumeJSON(session) {
   const config = sectorConfig(session);
   const sectorLabel = session.data.customSector || config.label;
   const educationText = (d.education || [])
-    .map((entry) => `${entry.qualification} (${entry.endYear})`)
+    .map(
+      (entry) =>
+        `${entry.qualification || entry.degree || ""} (${entry.endYear || entry.year || ""})`,
+    )
     .join(", ");
   const refinedResponsibilities = (d.refinedResponsibilities || []).join("; ");
   const weightedSkills = (d.weightedSkills || d.skills || []).join(", ");
@@ -1021,6 +1154,11 @@ async function callAIForResumeJSON(session) {
         keywords: d.roleProfile.keywords,
       })
     : "None";
+
+  const certificationsText = (d.certifications || [])
+    .map((item) => (typeof item === "string" ? item : item?.name || ""))
+    .filter(Boolean)
+    .join(", ");
 
   const prompt = `You are an expert resume writer. Convert this data into polished resume JSON.
 
@@ -1040,10 +1178,11 @@ Company: ${d.lastCompany || ""}
 Duration: ${d.lastDuration || d.internshipDuration || ""}
 Responsibilities: ${d.responsibilities}
 Refined Responsibilities: ${refinedResponsibilities || "None"}
+Parsed Summary: ${d.summary || ""}
 Skills: ${(d.skills || []).join(", ")}
 Weighted Skills: ${weightedSkills}
 Education: ${educationText}
-Certifications: ${(d.certifications || []).join(", ") || "None"}
+Certifications: ${certificationsText || "None"}
 Email: ${d.email}
 Phone: ${d.phone}
 City: ${d.city}
@@ -1051,6 +1190,12 @@ Role Profile: ${roleProfileText}
 Preferred resume emphasis: ${d.roleProfile?.resumeTone || TONE_BY_SECTOR[session.sector] || TONE_BY_SECTOR.custom}
 
 Ensure experience bullets use action verb + task + outcome style.
+
+STRICT TRUTHFULNESS RULES:
+- Do NOT invent or assume any facts.
+- Do NOT add fake companies, dates, tools, certifications, projects, metrics, or responsibilities.
+- If a section has no input, return it empty ("" or []).
+- Only rephrase and structure what is provided.
 
 Return valid JSON:
 {
@@ -1109,11 +1254,13 @@ function fallbackResume(session) {
     ],
     skills: d.skills || [],
     education: (d.education || []).map((entry) => ({
-      degree: entry.qualification,
-      institution: "",
-      year: String(entry.endYear || ""),
+      degree: entry.qualification || entry.degree || "",
+      institution: entry.institution || "",
+      year: String(entry.endYear || entry.year || ""),
     })),
-    certifications: d.certifications || [],
+    certifications: (d.certifications || [])
+      .map((item) => (typeof item === "string" ? item : item?.name || ""))
+      .filter(Boolean),
     languages: [],
   };
 }
@@ -1128,7 +1275,9 @@ async function handleGeneration(session) {
     }
 
     session.resumeJson = resumeJson;
-    const { html, pdfUrl } = await generateResumePackage(resumeJson);
+    const { html, pdfUrl } = await generateResumePackage(resumeJson, {
+      enforceSectionPresence: session.mode === "edit",
+    });
     session.resumeHtml = html;
     session.pdfUrl = pdfUrl;
     const { viewUrl, downloadUrl } = buildPdfAccessLinks(
@@ -1175,6 +1324,97 @@ function validatePhone(phone) {
 
 async function processMessage(session, rawMessage) {
   const payload = parsePayload(rawMessage);
+
+  // ──── STEP.MODE: Choose create or edit ────────────────────────────────
+  if (session.step === STEP.MODE) {
+    const mode = String(payload.option || payload.value || "").toLowerCase();
+    if (!["create", "edit"].includes(mode)) {
+      return buildStepResponse(session, {
+        replaceLast: true,
+        errors: {
+          general:
+            "Please choose 'Create New Resume' or 'Edit Existing Resume'.",
+        },
+      });
+    }
+
+    session.mode = mode;
+    pushSnapshot(session);
+
+    if (mode === "create") {
+      // Move to NAME step for creating new resume
+      session.step = STEP.NAME;
+      return buildStepResponse(session, {
+        acknowledgement: "Great! Let's build your resume from scratch.",
+      });
+    } else {
+      // Move to UPLOAD step for editing existing resume
+      session.step = STEP.UPLOAD;
+      return buildStepResponse(session, {
+        acknowledgement: "Perfect! Let's improve your existing resume.",
+      });
+    }
+  }
+
+  // ──── STEP.UPLOAD: Handle resume upload / parsing results ────────────────────
+  if (session.step === STEP.UPLOAD) {
+    const parsedResume = payload.resume || null;
+
+    if (!parsedResume) {
+      return buildStepResponse(session, {
+        replaceLast: true,
+        errors: { general: "Unable to process resume. Please try again." },
+      });
+    }
+
+    // Store the original parsed resume for reference
+    session.originalResume = JSON.parse(JSON.stringify(parsedResume));
+    session.resumeJson = JSON.parse(JSON.stringify(parsedResume));
+
+    // Map parsed data to session.data structure
+    session.data.name = parsedResume.name || null;
+    session.data.phone = parsedResume.phone || null;
+    session.data.email = parsedResume.email || null;
+    session.data.location = parsedResume.location || null;
+    session.data.summary = parsedResume.summary || null;
+    session.data.skills = Array.isArray(parsedResume.skills)
+      ? parsedResume.skills
+      : [];
+    session.data.education = Array.isArray(parsedResume.education)
+      ? parsedResume.education.map((entry) => ({
+          qualification: entry?.qualification || entry?.degree || "",
+          endYear: entry?.endYear || entry?.year || "",
+          institution: entry?.institution || "",
+        }))
+      : [];
+    session.data.certifications = Array.isArray(parsedResume.certifications)
+      ? parsedResume.certifications
+          .map((entry) =>
+            typeof entry === "string" ? entry : entry?.name || "",
+          )
+          .filter(Boolean)
+      : [];
+
+    // Store experience as responsibilities for now (can be enhanced later)
+    if (
+      Array.isArray(parsedResume.experience) &&
+      parsedResume.experience.length > 0
+    ) {
+      const exp = parsedResume.experience[0];
+      session.data.lastJobRole = exp.jobTitle || null;
+      session.data.lastCompany = exp.company || null;
+      session.data.responsibilities = exp.description || null;
+      if (!session.data.targetRole) {
+        session.data.targetRole = exp.jobTitle || null;
+      }
+    }
+
+    pushSnapshot(session);
+
+    // In edit flow, continue should generate immediately.
+    session.step = STEP.GENERATE;
+    return await handleGeneration(session);
+  }
 
   if (payload.action === "back") {
     const restored = restorePreviousSnapshot(session);
@@ -1478,6 +1718,8 @@ async function processMessage(session, rawMessage) {
       });
     }
     session.data.education = normalized;
+    session.data.certificationSuggestions =
+      await inferCertificationSuggestions(session);
     pushSnapshot(session);
     session.step = STEP.CERTIFICATIONS;
     return buildStepResponse(session, {

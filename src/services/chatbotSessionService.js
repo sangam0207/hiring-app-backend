@@ -12,20 +12,24 @@ const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 /**
  * @typedef {Object} ChatSession
  * @property {string}   id
+ * @property {string}   mode         - 'create' (new resume) | 'edit' (existing resume)
  * @property {number}   step         - Current internal step (0-13)
  * @property {string|null} sector    - 'hospitality' | 'aviation' | 'retail' | 'customer service'
  * @property {Object}   data         - Collected resume data
  * @property {Array}    history      - OpenAI conversation history [{role, content}]
  * @property {Object|null} resumeJson- Final structured resume
+ * @property {Object|null} originalResume - Original resume (for edit mode)
+ * @property {Array}    editHistory  - Snapshots of edits (for undo)
  * @property {string|null} pdfUrl    - S3 URL of generated PDF
  * @property {number}   lastActivity - Timestamp of last interaction
  */
 
-function createSession() {
+function createSession(mode = "create") {
   const id = uuidv4();
   const session = {
     id,
-    step: 0,
+    mode, // 'create' or 'edit'
+    step: -1, // Start at MODE selection step
     sector: null,
     data: {
       sector: null,
@@ -60,6 +64,8 @@ function createSession() {
     history: [],
     snapshots: [],
     resumeJson: null,
+    originalResume: null, // For edit mode
+    editHistory: [], // All versions of edited resume
     pdfUrl: null,
     lastActivity: Date.now(),
   };
@@ -109,6 +115,23 @@ function sessionExists(id) {
   return sessions.has(id);
 }
 
+/**
+ * Save a version of the edited resume to edit history
+ */
+function pushEditSnapshot(session, resumeData) {
+  if (!session) return;
+  session.editHistory = session.editHistory || [];
+  session.editHistory.push(JSON.parse(JSON.stringify(resumeData)));
+}
+
+/**
+ * Restore previous version from edit history
+ */
+function restorePreviousEdit(session) {
+  if (!session?.editHistory?.length) return null;
+  return session.editHistory.pop();
+}
+
 // Purge stale sessions every 30 minutes
 setInterval(
   () => {
@@ -127,4 +150,6 @@ module.exports = {
   sessionExists,
   pushSnapshot,
   restorePreviousSnapshot,
+  pushEditSnapshot,
+  restorePreviousEdit,
 };
