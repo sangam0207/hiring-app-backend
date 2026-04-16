@@ -7,10 +7,52 @@ const { successResponse, errorResponse } = require("../utils/response");
 const { sendAIInterviewEmail } = require("../services/emailService");
 const notificationService = require("../services/notificationService");
 
+// POST /api/ai-interview/:applicationId/generate-questions — HR previews AI-generated questions
+const generateQuestions = async (req, res, next) => {
+  try {
+    const { applicationId } = req.params;
+
+    const application = await prisma.application.findUnique({
+      where: { id: applicationId },
+      include: {
+        job: true,
+        parsedResume: true,
+        aiInterview: true,
+      },
+    });
+
+    if (!application) return errorResponse(res, "Application not found.", 404);
+    if (application.job.hrId !== req.user.id)
+      return errorResponse(res, "Access denied.", 403);
+
+    if (application.aiInterview) {
+      return errorResponse(
+        res,
+        "AI interview already exists for this application.",
+        409
+      );
+    }
+
+    const questions = await generateInterviewQuestions(
+      application.job,
+      application.parsedResume
+    );
+
+    if (!questions || questions.length === 0) {
+      return errorResponse(res, "Failed to generate interview questions.", 500);
+    }
+
+    return successResponse(res, { questions }, "Questions generated successfully.");
+  } catch (error) {
+    next(error);
+  }
+};
+
 // POST /api/ai-interview/:applicationId/trigger — HR triggers AI interview for a candidate
 const triggerAIInterview = async (req, res, next) => {
   try {
     const { applicationId } = req.params;
+    const { questions: customQuestions } = req.body;
 
     const application = await prisma.application.findUnique({
       where: { id: applicationId },
@@ -35,11 +77,14 @@ const triggerAIInterview = async (req, res, next) => {
       );
     }
 
-    // Generate questions using AI
-    const questions = await generateInterviewQuestions(
-      application.job,
-      application.parsedResume
-    );
+    // Use custom questions from HR or generate new ones
+    let questions = customQuestions;
+    if (!questions || !Array.isArray(questions) || questions.length === 0) {
+      questions = await generateInterviewQuestions(
+        application.job,
+        application.parsedResume
+      );
+    }
 
     if (!questions || questions.length === 0) {
       return errorResponse(res, "Failed to generate interview questions.", 500);
@@ -374,6 +419,7 @@ const getAIInterview = async (req, res, next) => {
 };
 
 module.exports = {
+  generateQuestions,
   triggerAIInterview,
   startAIInterview,
   submitAIInterview,

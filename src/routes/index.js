@@ -124,7 +124,15 @@ userRouter.get("/:id/profile", authenticate, authCtrl.getPublicProfile);
 // ─── AI Interview Routes ────────────────────────────────────────────────────────
 const aiInterviewRouter = express.Router();
 
-// HR: trigger AI interview for a candidate
+// HR: generate preview questions for AI interview
+aiInterviewRouter.post(
+  "/:applicationId/generate-questions",
+  authenticate,
+  requireHR,
+  aiInterviewCtrl.generateQuestions
+);
+
+// HR: trigger AI interview for a candidate (with optional custom questions)
 aiInterviewRouter.post(
   "/:applicationId/trigger",
   authenticate,
