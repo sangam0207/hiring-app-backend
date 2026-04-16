@@ -112,6 +112,12 @@ dashboardRouter.get(
 const chatbotRouter = express.Router();
 chatbotRouter.post("/start", chatbotCtrl.startSession);
 chatbotRouter.post("/message", chatbotCtrl.handleMessage);
+chatbotRouter.post(
+  "/parse-resume",
+  upload.single("file"),
+  chatbotCtrl.parseResume,
+);
+chatbotRouter.post("/improve-resume-section", chatbotCtrl.improveResumeSection);
 chatbotRouter.delete("/session/:sessionId", chatbotCtrl.resetSession);
 
 const jdChatbotRouter = express.Router();

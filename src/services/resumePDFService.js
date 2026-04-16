@@ -268,6 +268,64 @@ function normalizeResumeInput(input) {
   };
 }
 
+function ensureSectionPresence(resume) {
+  const next = clone(resume || {});
+
+  if (!String(next.summary || "").trim()) next.summary = "";
+
+  if (!Array.isArray(next.experience) || !next.experience.length) {
+    next.experience = [];
+  }
+
+  if (!Array.isArray(next.skills) || !next.skills.length) {
+    next.skills = [];
+  }
+
+  if (!Array.isArray(next.skill_highlights) || !next.skill_highlights.length) {
+    next.skill_highlights = [];
+  }
+
+  if (!Array.isArray(next.education) || !next.education.length) {
+    next.education = [];
+  }
+
+  if (!Array.isArray(next.certifications) || !next.certifications.length) {
+    next.certifications = [];
+  }
+
+  return next;
+}
+
+function hasNonEmptyText(value) {
+  return String(value || "").trim().length > 0;
+}
+
+function hasNonEmptyExperience(resume) {
+  return (resume.experience || []).some(
+    (item) =>
+      hasNonEmptyText(item?.job_title) ||
+      hasNonEmptyText(item?.company) ||
+      hasNonEmptyText(item?.duration) ||
+      (item?.responsibilities || []).some((bullet) => hasNonEmptyText(bullet)),
+  );
+}
+
+function hasNonEmptyEducation(resume) {
+  return (resume.education || []).some(
+    (item) =>
+      hasNonEmptyText(item?.degree) ||
+      hasNonEmptyText(item?.institution) ||
+      hasNonEmptyText(item?.year) ||
+      (item?.highlights || []).some((bullet) => hasNonEmptyText(bullet)),
+  );
+}
+
+function hasNonEmptyCertifications(resume) {
+  return (resume.certifications || []).some(
+    (item) => hasNonEmptyText(item?.name) || hasNonEmptyText(item?.highlight),
+  );
+}
+
 function summarizeRoleContext(resume) {
   const role = resume.target_role || "the target role";
   const topSkills = resume.skills.slice(0, 4).join(", ");
@@ -527,26 +585,9 @@ function estimateHeight(resume, profile) {
     total += profile.itemGap;
   }
 
-  addSectionBase();
-  for (const bullet of resume.skill_highlights) {
-    total += textHeight(
-      "Helvetica",
-      profile.bodySize,
-      `- ${bullet}`,
-      contentWidth - 10,
-    );
-    total += profile.bulletGap;
-  }
-
-  addSectionBase();
-  for (const entry of resume.education) {
-    total += textHeight(
-      "Helvetica-Bold",
-      profile.bodySize,
-      [entry.degree, entry.institution, entry.year].filter(Boolean).join(" - "),
-      contentWidth,
-    );
-    for (const bullet of entry.highlights) {
+  if (resume.skill_highlights.length) {
+    addSectionBase();
+    for (const bullet of resume.skill_highlights) {
       total += textHeight(
         "Helvetica",
         profile.bodySize,
@@ -555,7 +596,30 @@ function estimateHeight(resume, profile) {
       );
       total += profile.bulletGap;
     }
-    total += profile.itemGap;
+  }
+
+  if (resume.education.length) {
+    addSectionBase();
+    for (const entry of resume.education) {
+      total += textHeight(
+        "Helvetica-Bold",
+        profile.bodySize,
+        [entry.degree, entry.institution, entry.year]
+          .filter(Boolean)
+          .join(" - "),
+        contentWidth,
+      );
+      for (const bullet of entry.highlights) {
+        total += textHeight(
+          "Helvetica",
+          profile.bodySize,
+          `- ${bullet}`,
+          contentWidth - 10,
+        );
+        total += profile.bulletGap;
+      }
+      total += profile.itemGap;
+    }
   }
 
   if (resume.certifications.length) {
@@ -701,15 +765,9 @@ function buildHtml(resume, profile) {
       ${experienceHtml}
     </section>
 
-    <section class="section">
-      <h2>Skills</h2>
-      <ul>${skillHtml}</ul>
-    </section>
+    ${resume.skill_highlights.length ? `<section class="section"><h2>Skills</h2><ul>${skillHtml}</ul></section>` : ""}
 
-    <section class="section">
-      <h2>Education</h2>
-      ${educationHtml}
-    </section>
+    ${resume.education.length ? `<section class="section"><h2>Education</h2>${educationHtml}</section>` : ""}
 
     ${resume.certifications.length ? `<section class="section"><h2>Certifications</h2>${certificationHtml}</section>` : ""}
   </main>
@@ -829,29 +887,33 @@ function buildPDFBuffer(resume, profile) {
       doc.moveDown(profile.itemGap / 12);
     }
 
-    renderSectionTitle(doc, profile, "Skills");
-    for (const bullet of resume.skill_highlights) {
-      renderBullet(doc, profile, bullet);
-    }
-
-    renderSectionTitle(doc, profile, "Education");
-    for (const entry of resume.education) {
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(profile.bodySize)
-        .fillColor("#111827")
-        .text(
-          [entry.degree, entry.institution, entry.year]
-            .filter(Boolean)
-            .join(" - "),
-          {
-            width: contentWidth,
-          },
-        );
-      for (const bullet of entry.highlights) {
+    if (resume.skill_highlights.length) {
+      renderSectionTitle(doc, profile, "Skills");
+      for (const bullet of resume.skill_highlights) {
         renderBullet(doc, profile, bullet);
       }
-      doc.moveDown(profile.itemGap / 12);
+    }
+
+    if (resume.education.length) {
+      renderSectionTitle(doc, profile, "Education");
+      for (const entry of resume.education) {
+        doc
+          .font("Helvetica-Bold")
+          .fontSize(profile.bodySize)
+          .fillColor("#111827")
+          .text(
+            [entry.degree, entry.institution, entry.year]
+              .filter(Boolean)
+              .join(" - "),
+            {
+              width: contentWidth,
+            },
+          );
+        for (const bullet of entry.highlights) {
+          renderBullet(doc, profile, bullet);
+        }
+        doc.moveDown(profile.itemGap / 12);
+      }
     }
 
     if (resume.certifications.length) {
@@ -881,8 +943,12 @@ function makeFilename(name) {
   return `resume-${base || "candidate"}-${Date.now()}.pdf`;
 }
 
-async function generateResumePackage(resumeJson) {
-  const normalized = normalizeResumeInput(resumeJson || {});
+async function generateResumePackage(resumeJson, options = {}) {
+  const enforceSectionPresence = Boolean(options.enforceSectionPresence);
+  const normalizedRaw = normalizeResumeInput(resumeJson || {});
+  const normalized = enforceSectionPresence
+    ? ensureSectionPresence(normalizedRaw)
+    : normalizedRaw;
 
   let enriched;
   try {
@@ -891,8 +957,22 @@ async function generateResumePackage(resumeJson) {
     enriched = fallbackEnrich(normalized);
   }
 
-  const candidate = chooseLayoutProfile(enriched);
-  const finalResume = candidate.prepared;
+  let postEnrich = enforceSectionPresence
+    ? ensureSectionPresence(enriched)
+    : enriched;
+
+  // In create mode, keep sections only if user actually provided content.
+  if (!enforceSectionPresence) {
+    if (!hasNonEmptyExperience(postEnrich)) postEnrich.experience = [];
+    if (!postEnrich.skills.length) postEnrich.skill_highlights = [];
+    if (!hasNonEmptyEducation(postEnrich)) postEnrich.education = [];
+    if (!hasNonEmptyCertifications(postEnrich)) postEnrich.certifications = [];
+  }
+
+  const candidate = chooseLayoutProfile(postEnrich);
+  const finalResume = enforceSectionPresence
+    ? ensureSectionPresence(candidate.prepared)
+    : candidate.prepared;
   const html = buildHtml(finalResume, candidate.profile);
   const pdfBuffer = await buildPDFBuffer(finalResume, candidate.profile);
   const pdfUrl = await uploadResume(
@@ -904,8 +984,8 @@ async function generateResumePackage(resumeJson) {
   return { html, pdfUrl };
 }
 
-async function generateResumePDF(resumeJson) {
-  const { pdfUrl } = await generateResumePackage(resumeJson);
+async function generateResumePDF(resumeJson, options = {}) {
+  const { pdfUrl } = await generateResumePackage(resumeJson, options);
   return pdfUrl;
 }
 
