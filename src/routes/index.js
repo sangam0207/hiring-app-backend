@@ -12,6 +12,8 @@ const applicationCtrl = require("../controllers/applicationController");
 const dashboardCtrl = require("../controllers/dashboardController");
 const resumeCtrl = require("../controllers/resumeController");
 const aiInterviewCtrl = require("../controllers/aiInterviewController");
+const chatbotCtrl = require("../controllers/chatbotController");
+const jdChatbotCtrl = require("../controllers/jdChatbotController");
 const notificationRouter = require("./notificationRoutes");
 
 // ─── Auth Routes ───────────────────────────────────────────────────────────────
@@ -102,15 +104,10 @@ applicationRouter.get(
 // ─── Dashboard Routes ──────────────────────────────────────────────────────────
 const dashboardRouter = express.Router();
 dashboardRouter.get("/hr", authenticate, requireHR, dashboardCtrl.getHRDashboard);
-dashboardRouter.get(
-  "/hr/jobs/:jobId/report",
-  authenticate,
-  requireHR,
-  dashboardCtrl.getJobReport
-);
+dashboardRouter.get("/hr/jobs/:jobId/report", authenticate, requireHR, dashboardCtrl.getJobReport);
 dashboardRouter.get("/candidate", authenticate, requireCandidate, dashboardCtrl.getCandidateDashboard);
 
-// ─── Resume Routes ──────────────────────────────────────────────────────────────
+// ─── Resume Routes ─────────────────────────────────────────────────────────────
 const resumeRouter = express.Router();
 resumeRouter.post("/upload", authenticate, requireCandidate, upload.single("resume"), resumeCtrl.uploadUserResume);
 resumeRouter.get("/", authenticate, requireCandidate, resumeCtrl.getUserResumes);
@@ -121,7 +118,7 @@ resumeRouter.patch("/:id/default", authenticate, requireCandidate, resumeCtrl.se
 const userRouter = express.Router();
 userRouter.get("/:id/profile", authenticate, authCtrl.getPublicProfile);
 
-// ─── AI Interview Routes ────────────────────────────────────────────────────────
+// ─── AI Interview Routes ───────────────────────────────────────────────────────
 const aiInterviewRouter = express.Router();
 
 // HR: generate preview questions for AI interview
@@ -163,6 +160,21 @@ aiInterviewRouter.get(
   aiInterviewCtrl.getAIInterview
 );
 
+// ─── Chatbot Routes ────────────────────────────────────────────────────────────
+// Public — no auth required (the chatbot is a standalone resume builder tool)
+const chatbotRouter = express.Router();
+chatbotRouter.post("/start", chatbotCtrl.startSession);
+chatbotRouter.post("/message", chatbotCtrl.handleMessage);
+chatbotRouter.post("/parse-resume", upload.single("file"), chatbotCtrl.parseResume);
+chatbotRouter.post("/improve-resume-section", chatbotCtrl.improveResumeSection);
+chatbotRouter.delete("/session/:sessionId", chatbotCtrl.resetSession);
+
+// ─── JD Chatbot Routes ─────────────────────────────────────────────────────────
+const jdChatbotRouter = express.Router();
+jdChatbotRouter.post("/start", jdChatbotCtrl.startSession);
+jdChatbotRouter.post("/message", jdChatbotCtrl.handleMessage);
+jdChatbotRouter.delete("/session/:sessionId", jdChatbotCtrl.resetSession);
+
 // ─── Mount all routers ─────────────────────────────────────────────────────────
 router.use("/auth", authRouter);
 router.use("/jobs", jobRouter);
@@ -171,6 +183,8 @@ router.use("/dashboard", dashboardRouter);
 router.use("/resumes", resumeRouter);
 router.use("/users", userRouter);
 router.use("/ai-interview", aiInterviewRouter);
+router.use("/chatbot/jd", jdChatbotRouter);
+router.use("/chatbot", chatbotRouter);
 router.use("/notifications", notificationRouter);
 
 module.exports = router;

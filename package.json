@@ -28,6 +28,7 @@
     "nodemailer": "^8.0.4",
     "openai": "^4.52.0",
     "pdf-parse": "^1.1.1",
+    "pdfkit": "^0.18.0",
     "uuid": "^10.0.0"
   },
   "devDependencies": {
