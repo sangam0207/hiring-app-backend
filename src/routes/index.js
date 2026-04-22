@@ -160,6 +160,7 @@ aiInterviewRouter.get(
   aiInterviewCtrl.getAIInterview
 );
 
+aiInterviewRouter.post("/:applicationId/screenshot",  authenticate,requireCandidate, aiInterviewCtrl.saveScreenshot);
 // ─── Chatbot Routes ────────────────────────────────────────────────────────────
 // Public — no auth required (the chatbot is a standalone resume builder tool)
 const chatbotRouter = express.Router();

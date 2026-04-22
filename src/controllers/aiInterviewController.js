@@ -6,7 +6,7 @@ const {
 const { successResponse, errorResponse } = require("../utils/response");
 const { sendAIInterviewEmail } = require("../services/emailService");
 const notificationService = require("../services/notificationService");
-
+const {uploadScreenshot} = require("../services/s3Service.js");
 // POST /api/ai-interview/:applicationId/generate-questions — HR previews AI-generated questions
 const generateQuestions = async (req, res, next) => {
   try {
@@ -418,10 +418,47 @@ const getAIInterview = async (req, res, next) => {
   }
 };
 
+const saveScreenshot = async (req, res, next) => {
+  try {
+    const { applicationId } = req.params;
+    const { screenshot } = req.body; 
+
+    if (!screenshot) {
+      return errorResponse(res, "Screenshot data is required.", 400);
+    }
+
+    const application = await prisma.application.findUnique({
+      where: { id: applicationId },
+      include: { aiInterview: true },
+    });
+
+    if (!application) return errorResponse(res, "Application not found.", 404);
+    if (application.candidateId !== req.user.id)
+      return errorResponse(res, "Access denied.", 403);
+
+    if (!application.aiInterview || application.aiInterview.status !== "IN_PROGRESS") {
+      return errorResponse(res, "No active interview found.", 400);
+    }
+
+    const base64Data = screenshot.replace(/^data:image\/\w+;base64,/, "");
+    const screenshotUrl = await uploadScreenshot(base64Data, applicationId);
+
+    await prisma.aIInterview.update({
+      where: { id: application.aiInterview.id },
+      data: { screenshotUrl },
+    });
+
+    return successResponse(res, { screenshotUrl }, "Screenshot saved.");
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   generateQuestions,
   triggerAIInterview,
   startAIInterview,
   submitAIInterview,
   getAIInterview,
+  saveScreenshot
 };

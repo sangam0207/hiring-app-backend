@@ -133,10 +133,26 @@ async function uploadImage(fileBuffer, originalName, mimetype) {
   return data.Location;
 }
 
+async function uploadScreenshot(base64Data, applicationId) {
+  const buffer = Buffer.from(base64Data, "base64");
+  const key = `screenshots/${applicationId}/${Date.now()}.png`;
+
+  const params = {
+    Bucket: process.env.AWS_BUCKET,
+    Key: key,
+    Body: buffer,
+    ContentType: "image/png",
+  };
+
+  const data = await s3.upload(params).promise();
+  return data.Location;
+}
+
 module.exports = {
   uploadResume,
   deleteResume,
   getSignedUrl,
   fetchFileAsBuffer,
   uploadImage,
+  uploadScreenshot,
 };

@@ -170,6 +170,7 @@ model AIInterview {
   evaluation      Json?              // [{question, answer, score, feedback}]
   overallScore    Float?             // 0-100
   aiSummary       String?            @db.Text
+  screenshotUrl   String?
   strengths       String[]
   improvements    String[]
 
