@@ -23,6 +23,8 @@ const authenticate = async (req, res, next) => {
         name: true,
         role: true,
         company: true,
+        plan: true,
+        planExpiresAt: true,
       },
     });
 

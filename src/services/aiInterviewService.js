@@ -3,6 +3,64 @@ const openai = require("../config/openai");
 /**
  * Generate 5 interview questions tailored to the job and candidate profile
  */
+// const generateInterviewQuestions = async (job, parsedResume = null) => {
+//   const candidateContext = parsedResume
+//     ? `
+// Candidate Profile:
+// - Skills: ${parsedResume.extractedSkills?.join(", ") || "N/A"}
+// - Experience: ${parsedResume.totalExperience || "N/A"} years
+// - Current Role: ${parsedResume.currentRole || "N/A"}
+// - Summary: ${parsedResume.aiSummary || "N/A"}
+// - Strengths: ${parsedResume.strengths?.join(", ") || "N/A"}
+// - Gaps: ${parsedResume.gaps?.join(", ") || "N/A"}`
+//     : "";
+
+//   const systemPrompt = `You are an expert technical interviewer. Generate interview questions that are specific, practical, and assess both technical skills and problem-solving ability. Always respond with valid JSON only.`;
+
+//   const userPrompt = `Generate exactly 5 interview questions for this role. Mix technical, behavioral, and situational questions. Tailor them to the job requirements and candidate profile.
+
+// === JOB DETAILS ===
+// Title: ${job.title}
+// Description: ${job.description}
+// Requirements: ${job.requirements}
+// Required Skills: ${job.requiredSkills.join(", ")}
+// Experience Level: ${job.experienceLevel}
+// ${candidateContext}
+
+// === REQUIRED JSON FORMAT ===
+// {
+//   "questions": [
+//     "Question 1 text here",
+//     "Question 2 text here",
+//     "Question 3 text here",
+//     "Question 4 text here",
+//     "Question 5 text here"
+//   ]
+// }
+
+// Guidelines:
+// - Q1: Technical question about a core required skill
+// - Q2: Practical scenario/problem-solving question
+// - Q3: Behavioral question (past experience)
+// - Q4: Technical question about another required skill or system design
+// - Q5: Situational question about teamwork/challenges
+// - Keep questions concise (1-2 sentences each)
+// - If candidate has gaps, ask about those areas to assess learning ability`;
+
+//   const response = await openai.chat.completions.create({
+//     model: "gpt-4o-mini",
+//     messages: [
+//       { role: "system", content: systemPrompt },
+//       { role: "user", content: userPrompt },
+//     ],
+//     temperature: 0.7,
+//     max_tokens: 1000,
+//     response_format: { type: "json_object" },
+//   });
+
+//   const parsed = JSON.parse(response.choices[0].message.content);
+//   return Array.isArray(parsed.questions) ? parsed.questions.slice(0, 5) : [];
+// };
 const generateInterviewQuestions = async (job, parsedResume = null) => {
   const candidateContext = parsedResume
     ? `
@@ -15,9 +73,14 @@ Candidate Profile:
 - Gaps: ${parsedResume.gaps?.join(", ") || "N/A"}`
     : "";
 
-  const systemPrompt = `You are an expert technical interviewer. Generate interview questions that are specific, practical, and assess both technical skills and problem-solving ability. Always respond with valid JSON only.`;
+  const systemPrompt = `You are a senior HR recruiter conducting an initial screening call. 
+Your goal is to assess the candidate's background, role fit, soft skills, and motivation.
+Do NOT ask about salary, notice period, or any logistics.
+Do NOT ask technical or code-based questions.
+Ask questions that feel like a real HR phone screening — warm, conversational, and professional.
+Always respond with valid JSON only.`;
 
-  const userPrompt = `Generate exactly 5 interview questions for this role. Mix technical, behavioral, and situational questions. Tailor them to the job requirements and candidate profile.
+  const userPrompt = `Generate exactly 5 HR screening questions for this candidate based on their profile and the job role.
 
 === JOB DETAILS ===
 Title: ${job.title}
@@ -25,7 +88,23 @@ Description: ${job.description}
 Requirements: ${job.requirements}
 Required Skills: ${job.requiredSkills.join(", ")}
 Experience Level: ${job.experienceLevel}
+Sector: ${job.sector || "General"}
 ${candidateContext}
+
+=== QUESTION STRUCTURE ===
+- Q1: "Tell me about yourself" style — tailored to their current role and years of experience, not generic
+- Q2: Role-specific experience question — ask about the kind of projects or work they've handled relevant to this job
+- Q3: Behavioral question — a past challenge, achievement, or situation they navigated (STAR format friendly)
+- Q4: Soft skill question — how they handle pressure, adapt to change, manage priorities, or collaborate with teams
+- Q5: Motivation question — what drives them in this domain or why they're interested in growing in this direction
+
+=== STRICT RULES ===
+- NO salary, CTC, notice period, or relocation questions
+- NO technical questions, no code, no system design
+- Every question must feel natural and conversational like a real HR call
+- Tailor each question specifically to the candidate's current role, experience level, and the job sector
+- Keep each question to 1-2 sentences, clear and jargon-free
+- Questions should be open-ended to encourage the candidate to speak freely
 
 === REQUIRED JSON FORMAT ===
 {
@@ -36,16 +115,7 @@ ${candidateContext}
     "Question 4 text here",
     "Question 5 text here"
   ]
-}
-
-Guidelines:
-- Q1: Technical question about a core required skill
-- Q2: Practical scenario/problem-solving question
-- Q3: Behavioral question (past experience)
-- Q4: Technical question about another required skill or system design
-- Q5: Situational question about teamwork/challenges
-- Keep questions concise (1-2 sentences each)
-- If candidate has gaps, ask about those areas to assess learning ability`;
+}`;
 
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -61,7 +131,6 @@ Guidelines:
   const parsed = JSON.parse(response.choices[0].message.content);
   return Array.isArray(parsed.questions) ? parsed.questions.slice(0, 5) : [];
 };
-
 /**
  * Evaluate candidate's interview answers using AI
  */

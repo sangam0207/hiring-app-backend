@@ -28,7 +28,7 @@ const sendInterviewEmail = async ({ to, candidateName, jobTitle, company, interv
   }
 
   const mailOptions = {
-    from: `"${company || 'HireAI'}" <${process.env.SMTP_USER}>`,
+    from: `"${company || 'HiringPulse'}" <${process.env.SMTP_USER}>`,
     to,
     subject: `Interview Scheduled — ${jobTitle}`,
     html: `
@@ -75,7 +75,7 @@ const sendInterviewEmail = async ({ to, candidateName, jobTitle, company, interv
 
           <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0 16px"/>
           <p style="font-size:12px;color:#9ca3af;margin:0">
-            This is an automated message from HireAI. Please do not reply to this email.
+            This is an automated message from HiringPulse. Please do not reply to this email.
           </p>
         </div>
       </div>
@@ -112,7 +112,7 @@ const sendAIInterviewEmail = async ({ to, candidateName, jobTitle, company, dead
   });
 
   const mailOptions = {
-    from: `"${company || 'HireAI'}" <${process.env.SMTP_USER}>`,
+    from: `"${company || 'HiringPulse'}" <${process.env.SMTP_USER}>`,
     to,
     subject: `AI Interview Invitation — ${jobTitle}`,
     html: `
@@ -153,7 +153,7 @@ const sendAIInterviewEmail = async ({ to, candidateName, jobTitle, company, dead
 
           <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0 16px"/>
           <p style="font-size:12px;color:#9ca3af;margin:0">
-            This is an automated message from HireAI. Please do not reply to this email.
+            This is an automated message from HiringPulse. Please do not reply to this email.
           </p>
         </div>
       </div>
