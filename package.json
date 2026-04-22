@@ -12,7 +12,7 @@
     "db:push": "npx prisma db push"
   },
   "dependencies": {
-    "@prisma/client": "^5.14.0",
+    "@prisma/client": "5.14.0",
     "aws-sdk": "^2.1691.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
@@ -29,10 +29,11 @@
     "openai": "^4.52.0",
     "pdf-parse": "^1.1.1",
     "pdfkit": "^0.18.0",
+    "razorpay": "^2.9.6",
     "uuid": "^10.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.4",
-    "prisma": "^5.14.0"
+    "prisma": "5.14.0"
   }
 }

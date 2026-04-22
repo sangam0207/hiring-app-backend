@@ -87,7 +87,8 @@ Scoring Guidelines:
 - skillMatchScore: Count how many required skills the candidate has vs total required skills
 - experienceScore: Rate based on required experience level (ENTRY=0-1yr, JUNIOR=1-3yr, MID=3-5yr, SENIOR=5-8yr, LEAD=8+yr)
 - matchScore: Combination of skills, experience, and relevance
-- screeningScore: Evaluate screening answers for quality, relevance, and honesty. Rate salary expectations reasonableness, notice period, and role-specific answers. null if no screening answers.
+- screeningScore: ALWAYS evaluate screening answers when they are provided, even if answers are very short or low quality. Rate 0-100 based on quality, relevance, and honesty. Poor/minimal answers should get a low score (5-20), not null. Only return null if NO screening answers section exists at all.
+- screeningEvaluation: ALWAYS return this array when screening answers are provided. Each answer MUST get a rating (good/average/poor) and a brief remark. Even one-word answers should be evaluated as "poor" with a remark like "Answer too brief to evaluate".
 - overallScore: Weighted average — if screening answers exist: (skills 30%, experience 25%, match 25%, screening 20%). Otherwise: (skills 40%, experience 30%, match 30%)
 - isRecommended: true if overallScore >= 65`;
 

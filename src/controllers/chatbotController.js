@@ -226,6 +226,7 @@ async function parseResume(req, res) {
     // ──── Structure the text using LLM ────
     try {
       const structured = await structureResumeFromText(resumeText);
+
       return res.status(200).json({
         success: true,
         resume: structured,
@@ -275,6 +276,7 @@ async function improveResumeSection(req, res) {
     }
 
     const improved = await improveSectionWithAI(section, sectionData, mode);
+
     return res.status(200).json({ success: true, improved });
   } catch (err) {
     console.error("[Chatbot] improveResumeSection error:", err);

@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 
 const { authenticate, requireHR, requireCandidate } = require("../middleware/auth");
+const { requirePremium, checkJobPostLimit } = require("../middleware/credits");
 const upload = require("../config/multer");
 const { imageUpload } = require("../config/multer");
 
@@ -15,6 +16,7 @@ const aiInterviewCtrl = require("../controllers/aiInterviewController");
 const chatbotCtrl = require("../controllers/chatbotController");
 const jdChatbotCtrl = require("../controllers/jdChatbotController");
 const notificationRouter = require("./notificationRoutes");
+const creditRouter = require("./creditRoutes");
 
 // ─── Auth Routes ───────────────────────────────────────────────────────────────
 const authRouter = express.Router();
@@ -30,7 +32,7 @@ authRouter.post("/autofill-resume", authenticate, requireCandidate, upload.singl
 const jobRouter = express.Router();
 
 // HR operations (protected)
-jobRouter.post("/", authenticate, requireHR, jobCtrl.createJob);
+jobRouter.post("/", authenticate, requireHR, checkJobPostLimit, jobCtrl.createJob);
 jobRouter.put("/:id", authenticate, requireHR, jobCtrl.updateJob);
 jobRouter.delete("/:id", authenticate, requireHR, jobCtrl.deleteJob);
 jobRouter.patch("/:id/status", authenticate, requireHR, jobCtrl.updateJobStatus);
@@ -86,11 +88,12 @@ applicationRouter.post(
   applicationCtrl.scheduleInterview
 );
 
-// HR: trigger manual resume re-parse
+// HR: trigger manual resume re-parse (premium only)
 applicationRouter.post(
   "/:applicationId/parse",
   authenticate,
   requireHR,
+  requirePremium,
   applicationCtrl.triggerResumeParse
 );
 
@@ -118,22 +121,24 @@ resumeRouter.patch("/:id/default", authenticate, requireCandidate, resumeCtrl.se
 const userRouter = express.Router();
 userRouter.get("/:id/profile", authenticate, authCtrl.getPublicProfile);
 
-// ─── AI Interview Routes ───────────────────────────────────────────────────────
+// ─── AI Interview Routes (premium only for HR actions) ──────────────────────────
 const aiInterviewRouter = express.Router();
 
-// HR: generate preview questions for AI interview
+// HR: generate preview questions for AI interview (premium only)
 aiInterviewRouter.post(
   "/:applicationId/generate-questions",
   authenticate,
   requireHR,
+  requirePremium,
   aiInterviewCtrl.generateQuestions
 );
 
-// HR: trigger AI interview for a candidate (with optional custom questions)
+// HR: trigger AI interview for a candidate (premium only)
 aiInterviewRouter.post(
   "/:applicationId/trigger",
   authenticate,
   requireHR,
+  requirePremium,
   aiInterviewCtrl.triggerAIInterview
 );
 
@@ -160,20 +165,19 @@ aiInterviewRouter.get(
   aiInterviewCtrl.getAIInterview
 );
 
-// ─── Chatbot Routes ────────────────────────────────────────────────────────────
-// Public — no auth required (the chatbot is a standalone resume builder tool)
+// ─── Chatbot Routes (Resume builder — Candidate, premium check on HR's JD bot) ─
 const chatbotRouter = express.Router();
-chatbotRouter.post("/start", chatbotCtrl.startSession);
-chatbotRouter.post("/message", chatbotCtrl.handleMessage);
-chatbotRouter.post("/parse-resume", upload.single("file"), chatbotCtrl.parseResume);
-chatbotRouter.post("/improve-resume-section", chatbotCtrl.improveResumeSection);
-chatbotRouter.delete("/session/:sessionId", chatbotCtrl.resetSession);
+chatbotRouter.post("/start", authenticate, requireCandidate, chatbotCtrl.startSession);
+chatbotRouter.post("/message", authenticate, requireCandidate, chatbotCtrl.handleMessage);
+chatbotRouter.post("/parse-resume", authenticate, requireCandidate, upload.single("file"), chatbotCtrl.parseResume);
+chatbotRouter.post("/improve-resume-section", authenticate, requireCandidate, chatbotCtrl.improveResumeSection);
+chatbotRouter.delete("/session/:sessionId", authenticate, requireCandidate, chatbotCtrl.resetSession);
 
-// ─── JD Chatbot Routes ─────────────────────────────────────────────────────────
+// ─── JD Chatbot Routes (JD builder — HR, premium only) ─────────────────────────
 const jdChatbotRouter = express.Router();
-jdChatbotRouter.post("/start", jdChatbotCtrl.startSession);
-jdChatbotRouter.post("/message", jdChatbotCtrl.handleMessage);
-jdChatbotRouter.delete("/session/:sessionId", jdChatbotCtrl.resetSession);
+jdChatbotRouter.post("/start", authenticate, requireHR, requirePremium, jdChatbotCtrl.startSession);
+jdChatbotRouter.post("/message", authenticate, requireHR, requirePremium, jdChatbotCtrl.handleMessage);
+jdChatbotRouter.delete("/session/:sessionId", authenticate, requireHR, jdChatbotCtrl.resetSession);
 
 // ─── Mount all routers ─────────────────────────────────────────────────────────
 router.use("/auth", authRouter);
@@ -186,5 +190,6 @@ router.use("/ai-interview", aiInterviewRouter);
 router.use("/chatbot/jd", jdChatbotRouter);
 router.use("/chatbot", chatbotRouter);
 router.use("/notifications", notificationRouter);
+router.use("/credits", creditRouter);
 
 module.exports = router;

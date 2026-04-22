@@ -72,14 +72,18 @@ model User {
   profileImageUrl String?
   coverImageUrl   String?
 
+  plan            String   @default("FREE") // FREE, STANDARD, or PREMIUM
+  planExpiresAt   DateTime?                    // null = no active premium
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   // Relations
-  postedJobs   Job[]          @relation("HRJobs")
-  applications Application[]  @relation("CandidateApplications")
-  resumes      Resume[]       @relation("UserResumes")
-  notifications Notification[] @relation("UserNotifications")
+  postedJobs         Job[]                @relation("HRJobs")
+  applications       Application[]        @relation("CandidateApplications")
+  resumes            Resume[]             @relation("UserResumes")
+  notifications      Notification[]       @relation("UserNotifications")
+  payments           Payment[]
 
   @@map("users")
 }
@@ -248,4 +252,23 @@ model Notification {
   createdAt     DateTime @default(now())
 
   @@map("notifications")
+}
+
+// ─── Payments & Subscriptions ─────────────────────────────────────────────────
+
+model Payment {
+  id                String   @id @default(uuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planType          String   @default("STANDARD") // STANDARD or PREMIUM
+  amount            Int      // paise (e.g. 99900 = ₹999)
+  durationDays      Int      @default(30)        // 30 days = 1 month
+  razorpayOrderId   String   @unique
+  razorpayPaymentId String?
+  razorpaySignature String?
+  status            String   @default("PENDING") // PENDING, PAID, FAILED
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("payments")
 }

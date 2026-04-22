@@ -1,10 +1,11 @@
 const prisma = require("../config/prisma");
-const { uploadResume, fetchFileAsBuffer, deleteResume } = require("../services/s3Service");
+const { uploadResume, fetchFileAsBuffer, deleteResume, getSignedUrl } = require("../services/s3Service");
 const { extractTextFromResume } = require("../utils/resumeExtractor");
 const { parseResumeWithAI } = require("../services/resumeParserService");
 const { successResponse, errorResponse, paginatedResponse } = require("../utils/response");
 const { sendInterviewEmail } = require("../services/emailService");
 const notificationService = require("../services/notificationService");
+const { hasActivePlan } = require("../services/creditService");
 
 // POST /api/applications/:jobId/apply - Candidate applies with resume
 const applyToJob = async (req, res, next) => {
@@ -94,21 +95,26 @@ const applyToJob = async (req, res, next) => {
       },
     });
 
-    // Trigger async resume parsing (include screening answers for AI evaluation)
-    parseResumeInBackground(
-      application.id,
-      fileBuffer,
-      fileMimetype,
-      job,
-      parsedScreeningAnswers
-    ).catch((err) =>
-      console.error(`Resume parsing failed for application ${application.id}:`, err)
-    );
+    // Only run AI resume parsing if the HR has an active paid plan (Standard or Premium)
+    const hrHasPlan = await hasActivePlan(job.hrId);
+    if (hrHasPlan) {
+      parseResumeInBackground(
+        application.id,
+        fileBuffer,
+        fileMimetype,
+        job,
+        null // screening answers only evaluated on premium re-analysis
+      ).catch((err) =>
+        console.error(`Resume parsing failed for application ${application.id}:`, err)
+      );
+    }
 
     return successResponse(
       res,
       { application },
-      "Application submitted successfully. Resume is being analyzed.",
+      hrHasPlan
+        ? "Application submitted successfully. Resume is being analyzed."
+        : "Application submitted successfully.",
       201
     );
   } catch (error) {
@@ -212,7 +218,7 @@ const triggerResumeParse = async (req, res, next) => {
         docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       };
       const mimetype = mimetypeMap[ext] || "application/pdf";
-      await parseResumeInBackground(applicationId, fileBuffer, mimetype, application.job);
+      await parseResumeInBackground(applicationId, fileBuffer, mimetype, application.job, application.screeningAnswers);
     };
 
     reparseAsync().catch(console.error);
@@ -345,7 +351,14 @@ const getApplicationById = async (req, res, next) => {
       return errorResponse(res, "Access denied.", 403);
     }
 
-    return successResponse(res, { application });
+    // Attach a signed URL so the frontend can view/download the resume
+    const resumeSignedUrl = application.resumeUrl
+      ? getSignedUrl(application.resumeUrl, 3600)
+      : null;
+
+    return successResponse(res, {
+      application: { ...application, resumeSignedUrl },
+    });
   } catch (error) {
     next(error);
   }

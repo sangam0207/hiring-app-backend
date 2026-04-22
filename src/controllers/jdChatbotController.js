@@ -107,6 +107,7 @@ async function handleMessage(req, res) {
     }
 
     const response = await processMessage(session, message);
+
     return res.status(200).json({
       success: true,
       sessionId,
