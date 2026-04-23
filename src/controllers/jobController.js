@@ -341,9 +341,9 @@ const getScreeningQuestions = async (req, res, next) => {
 
     // Fixed standard HR questions
     const fixedQuestions = [
-      { id: "q1", question: "What is your current CTC / salary?", type: "fixed", inputType: "text" },
-      { id: "q2", question: "What is your expected CTC / salary?", type: "fixed", inputType: "text" },
-      { id: "q3", question: "What is your notice period?", type: "fixed", inputType: "text" },
+      { id: "q1", question: "What is your current CTC / salary (in LPA)?", type: "fixed", inputType: "text" },
+      { id: "q2", question: "What is your expected CTC / salary (in LPA)?", type: "fixed", inputType: "text" },
+      { id: "q3", question: "What is your notice period (in days)?", type: "fixed", inputType: "text" },
     ];
 
     // Generate role-specific questions via OpenAI

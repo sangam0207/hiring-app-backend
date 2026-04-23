@@ -6,13 +6,16 @@ const {
 } = require("../config/credits");
 
 const PAID_PLANS = ["STANDARD", "PREMIUM"];
-
+const isDevEnvironment = process.env.NODE_ENV !== "production";
+console.warn("is", isDevEnvironment);
 /**
  * Middleware: require an active Premium plan.
  * Gates: AI Interview, JD Chatbot, Re-analysis, Screening evaluation.
  */
 const requirePremium = async (req, res, next) => {
   try {
+    if (isDevEnvironment) return next();
+
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       select: { plan: true, planExpiresAt: true },
@@ -44,6 +47,8 @@ const requirePremium = async (req, res, next) => {
  */
 const requireStandard = async (req, res, next) => {
   try {
+    if (isDevEnvironment) return next();
+
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       select: { plan: true, planExpiresAt: true },
@@ -58,7 +63,8 @@ const requireStandard = async (req, res, next) => {
     if (!hasActive) {
       return res.status(403).json({
         success: false,
-        message: "A paid plan is required for this feature. Please subscribe to Standard or Premium.",
+        message:
+          "A paid plan is required for this feature. Please subscribe to Standard or Premium.",
         code: "PLAN_REQUIRED",
       });
     }
@@ -77,15 +83,15 @@ const requireStandard = async (req, res, next) => {
  */
 const checkJobPostLimit = async (req, res, next) => {
   try {
+    if (isDevEnvironment) return next();
+
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       select: { plan: true, planExpiresAt: true },
     });
 
     const notExpired =
-      user &&
-      user.planExpiresAt &&
-      new Date(user.planExpiresAt) > new Date();
+      user && user.planExpiresAt && new Date(user.planExpiresAt) > new Date();
 
     const activePlan =
       PAID_PLANS.includes(user?.plan) && notExpired ? user.plan : "FREE";
