@@ -17,6 +17,7 @@ const chatbotCtrl = require("../controllers/chatbotController");
 const jdChatbotCtrl = require("../controllers/jdChatbotController");
 const notificationRouter = require("./notificationRoutes");
 const creditRouter = require("./creditRoutes");
+const profileCtrl = require("../controllers/profileController.js");
 
 // ─── Auth Routes ───────────────────────────────────────────────────────────────
 const authRouter = express.Router();
@@ -26,8 +27,18 @@ authRouter.get("/me", authenticate, authCtrl.getMe);
 authRouter.put("/me", authenticate, authCtrl.updateProfile);
 authRouter.post("/upload-profile-image", authenticate, imageUpload.single("image"), authCtrl.uploadProfileImage);
 authRouter.post("/upload-cover-image", authenticate, imageUpload.single("image"), authCtrl.uploadCoverImage);
-authRouter.post("/autofill-resume", authenticate, requireCandidate, upload.single("resume"), authCtrl.autofillResume);
+// authRouter.post("/autofill-resume", authenticate, requireCandidate, upload.single("resume"), authCtrl.autofillResume);
 
+
+// ─── Profile Routes ────────────────────────────────────────────────────────────
+const profileRouter = express.Router();
+profileRouter.post("/autofill-resume", authenticate, requireCandidate, upload.single("resume"), profileCtrl.autofillFromResume);
+profileRouter.get("/", authenticate, requireCandidate, profileCtrl.getProfiles);
+profileRouter.get("/:id", authenticate, requireCandidate, profileCtrl.getProfile);
+profileRouter.post("/", authenticate, requireCandidate, profileCtrl.createProfile);
+profileRouter.put("/:id", authenticate, requireCandidate, profileCtrl.updateProfile);
+profileRouter.delete("/:id", authenticate, requireCandidate, profileCtrl.deleteProfile);
+profileRouter.patch("/:id/set-default", authenticate, requireCandidate, profileCtrl.setDefaultProfile);
 // ─── Job Routes ────────────────────────────────────────────────────────────────
 const jobRouter = express.Router();
 
@@ -192,5 +203,6 @@ router.use("/chatbot/jd", jdChatbotRouter);
 router.use("/chatbot", chatbotRouter);
 router.use("/notifications", notificationRouter);
 router.use("/credits", creditRouter);
+router.use("/profiles", profileRouter); 
 
 module.exports = router;

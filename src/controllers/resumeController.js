@@ -10,6 +10,17 @@ const uploadUserResume = async (req, res, next) => {
     }
 
     const userId = req.user.id;
+    const { profileId } = req.body; // ✅ optional — user may or may not link to a profile
+
+    // Validate profileId belongs to this user (if provided)
+    if (profileId) {
+      const profile = await prisma.profile.findFirst({
+        where: { id: profileId, userId },
+      });
+      if (!profile) {
+        return errorResponse(res, "Profile not found.", 404);
+      }
+    }
 
     // Upload to S3
     const fileUrl = await uploadResume(
@@ -18,7 +29,7 @@ const uploadUserResume = async (req, res, next) => {
       req.file.mimetype
     );
 
-    // Check if user has any resumes — if not, make this one default
+    // First resume ever = auto default
     const existingCount = await prisma.resume.count({ where: { userId } });
 
     const resume = await prisma.resume.create({
@@ -26,7 +37,8 @@ const uploadUserResume = async (req, res, next) => {
         userId,
         fileName: req.file.originalname,
         fileUrl,
-        isDefault: existingCount === 0, // First resume is auto-default
+        isDefault: existingCount === 0,
+        ...(profileId && { profileId }), // ✅ link to profile if provided
       },
     });
 
@@ -39,8 +51,13 @@ const uploadUserResume = async (req, res, next) => {
 // GET /api/resumes
 const getUserResumes = async (req, res, next) => {
   try {
+    const { profileId } = req.query; // ?profileId=xxx (optional)
+
     const resumes = await prisma.resume.findMany({
-      where: { userId: req.user.id },
+      where: {
+        userId: req.user.id,
+        ...(profileId && { profileId }), // ✅ filter by profile if provided
+      },
       orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
     });
 
