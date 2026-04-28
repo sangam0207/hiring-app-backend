@@ -47,207 +47,218 @@ enum AIInterviewStatus {
 }
 
 model User {
-  id              String   @id @default(uuid())
-  email           String   @unique
-  password        String
-  name            String
-  role            UserRole
-  company         String?  // For HR users
-  phone           String?
+  id       String   @id @default(uuid())
+  email    String   @unique
+  password String
+  name     String
+  role     UserRole
+  company  String?  // For HR users
+  phone    String?
 
-  // Profile fields (primarily for candidates)
-  headline        String?          // e.g. "Senior React Developer"
+  profileImageUrl String?
+  coverImageUrl   String?
+
+  plan          String    @default("FREE") // FREE, STANDARD, or PREMIUM
+  planExpiresAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  profiles      Profile[]      @relation("UserProfiles")
+  postedJobs    Job[]          @relation("HRJobs")
+  applications  Application[]  @relation("CandidateApplications")
+  resumes       Resume[]       @relation("UserResumes")
+  notifications Notification[] @relation("UserNotifications")
+  payments      Payment[]
+
+  @@map("users")
+}
+
+model Profile {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation("UserProfiles", fields: [userId], references: [id], onDelete: Cascade)
+
+  name      String
+  isDefault Boolean @default(false)
+
+  headline        String?
   summary         String?  @db.Text
   location        String?
   currentCompany  String?
   currentRole     String?
-  totalExperience Float?           // years
+  totalExperience Float?
   skills          String[]
-  education       Json?            // [{degree, institution, year, field}]
-  workExperience  Json?            // [{company, role, duration, description}]
+  education       Json?
+  workExperience  Json?
   certifications  String[]
   languages       String[]
   linkedinUrl     String?
   portfolioUrl    String?
   profileImageUrl String?
-  coverImageUrl   String?
 
-  plan            String   @default("FREE") // FREE, STANDARD, or PREMIUM
-  planExpiresAt   DateTime?                    // null = no active premium
+  resumes      Resume[]      @relation("ProfileResumes")  // ✅ fixed: Resume[] not [Resume]
+  applications Application[]
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  // Relations
-  postedJobs         Job[]                @relation("HRJobs")
-  applications       Application[]        @relation("CandidateApplications")
-  resumes            Resume[]             @relation("UserResumes")
-  notifications      Notification[]       @relation("UserNotifications")
-  payments           Payment[]
-
-  @@map("users")
-}
-
-model Job {
-  id              String          @id @default(uuid())
-  title           String
-  description     String          @db.Text
-  requirements    String          @db.Text
-  requiredSkills  String[]
-  experienceLevel ExperienceLevel
-  location        String?
-  salary          String?
-  jobType         String?         // Full-time, Part-time, Remote
-  status              JobStatus       @default(DRAFT)
-  screeningQuestions   Json?           // Cached AI-generated screening questions
-  hrId                String
-  hr              User            @relation("HRJobs", fields: [hrId], references: [id], onDelete: Cascade)
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-
-  applications    Application[]
-
-  @@map("jobs")
-}
-
-model Application {
-  id              String            @id @default(uuid())
-  jobId           String
-  job             Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  candidateId     String
-  candidate       User              @relation("CandidateApplications", fields: [candidateId], references: [id], onDelete: Cascade)
-  status          ApplicationStatus @default(APPLIED)
-  coverLetter     String?           @db.Text
-  resumeUrl       String            // Path/URL to uploaded resume
-  resumeFileName  String
-  screeningAnswers Json?             // [{question, answer}] from screening step
-  resumeId        String?           // Reference to saved resume (if used)
-  resume          Resume?           @relation(fields: [resumeId], references: [id])
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-
-  // Resume Parsing Results
-  parsedResume    ParsedResume?
-
-  // Interview scheduling (meeting-link based)
-  interview       Interview?
-
-  // AI Interview
-  aiInterview     AIInterview?
-
-  @@unique([jobId, candidateId])
-  @@map("applications")
-}
-
-model Interview {
-  id              String      @id @default(uuid())
-  applicationId   String      @unique
-  application     Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  interviewDate   String      // "YYYY-MM-DD"
-  interviewTime   String      // "HH:mm"
-  duration        Int         @default(30) // minutes
-  meetingLink     String
-  notes           String?     @db.Text
-
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-
-  @@map("interviews")
-}
-
-model AIInterview {
-  id              String             @id @default(uuid())
-  applicationId   String             @unique
-  application     Application        @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  status          AIInterviewStatus  @default(PENDING)
-  deadline        DateTime?          // 2 days from trigger
-
-  // AI-generated questions
-  questions       Json               // ["Q1", "Q2", "Q3", "Q4", "Q5"]
-
-  // Candidate answers (matching questions by index)
-  answers         Json?              // ["A1", "A2", "A3", "A4", "A5"]
-
-  // AI evaluation results
-  evaluation      Json?              // [{question, answer, score, feedback}]
-  overallScore    Float?             // 0-100
-  aiSummary       String?            @db.Text
-  screenshotUrl   String?
-  strengths       String[]
-  improvements    String[]
-
-  startedAt       DateTime?
-  completedAt     DateTime?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-
-  @@map("ai_interviews")
-}
-
-model ParsedResume {
-  id                  String      @id @default(uuid())
-  applicationId       String      @unique
-  application         Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  // Extracted Info
-  candidateName       String?
-  email               String?
-  phone               String?
-  location            String?
-  summary             String?     @db.Text
-
-  // Skills & Experience
-  extractedSkills     String[]
-  totalExperience     Float?      // in years
-  currentRole         String?
-  education           Json?       // Array of {degree, institution, year}
-  workExperience      Json?       // Array of {company, role, duration, description}
-  projects            Json?       // Array of {name, description, technologies}
-  certifications      String[]
-  languages           String[]
-
-  // AI Matching & Scoring
-  matchScore          Float       // 0-100
-  skillMatchScore     Float       // 0-100
-  experienceScore     Float       // 0-100
-  screeningScore      Float?      // 0-100 (AI evaluation of screening answers)
-  overallScore        Float       // 0-100
-
-  // AI Insights
-  strengths           String[]
-  gaps                String[]
-  aiSummary           String?     @db.Text
-  recommendationNote  String?     @db.Text
-  isRecommended       Boolean     @default(false)
-
-  parsedAt            DateTime    @default(now())
-  updatedAt           DateTime    @updatedAt
-
-  @@map("parsed_resumes")
+  @@map("profiles")
 }
 
 model Resume {
-  id           String        @id @default(uuid())
-  userId       String
-  user         User          @relation("UserResumes", fields: [userId], references: [id], onDelete: Cascade)
-  fileName     String
-  fileUrl      String
-  isDefault    Boolean       @default(false)
-  createdAt    DateTime      @default(now())
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation("UserResumes", fields: [userId], references: [id], onDelete: Cascade)
+  profileId String?
+  profile   Profile? @relation("ProfileResumes", fields: [profileId], references: [id], onDelete: SetNull)  // ✅ added
+  fileName  String
+  fileUrl   String
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
 
   applications Application[]
 
   @@map("resumes")
 }
 
+model Job {
+  id                 String          @id @default(uuid())
+  title              String
+  description        String          @db.Text
+  requirements       String          @db.Text
+  requiredSkills     String[]
+  experienceLevel    ExperienceLevel
+  location           String?
+  salary             String?
+  jobType            String?
+  status             JobStatus       @default(DRAFT)
+  screeningQuestions Json?
+  hrId               String
+  hr                 User            @relation("HRJobs", fields: [hrId], references: [id], onDelete: Cascade)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  applications Application[]
+
+  @@map("jobs")
+}
+
+model Application {
+  id               String            @id @default(uuid())
+  jobId            String
+  job              Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  candidateId      String
+  candidate        User              @relation("CandidateApplications", fields: [candidateId], references: [id], onDelete: Cascade)
+  status           ApplicationStatus @default(APPLIED)
+  coverLetter      String?           @db.Text
+  resumeUrl        String
+  resumeFileName   String
+  screeningAnswers Json?
+  resumeId         String?
+  resume           Resume?           @relation(fields: [resumeId], references: [id])
+  profileId        String?
+  profile          Profile?          @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  parsedResume ParsedResume?
+  interview    Interview?
+  aiInterview  AIInterview?
+
+  @@unique([jobId, candidateId])
+  @@map("applications")
+}
+
+model Interview {
+  id            String      @id @default(uuid())
+  applicationId String      @unique
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  interviewDate String
+  interviewTime String
+  duration      Int     @default(30)
+  meetingLink   String
+  notes         String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("interviews")
+}
+
+model AIInterview {
+  id            String      @id @default(uuid())
+  applicationId String      @unique
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  status   AIInterviewStatus @default(PENDING)
+  deadline DateTime?
+
+  questions     Json
+  answers       Json?
+  evaluation    Json?
+  overallScore  Float?
+  aiSummary     String?  @db.Text
+  screenshotUrl String?
+  strengths     String[]
+  improvements  String[]
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("ai_interviews")
+}
+
+model ParsedResume {
+  id            String      @id @default(uuid())
+  applicationId String      @unique
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  candidateName String?
+  email         String?
+  phone         String?
+  location      String?
+  summary       String? @db.Text
+
+  extractedSkills String[]
+  totalExperience Float?
+  currentRole     String?
+  education       Json?
+  workExperience  Json?
+  projects        Json?
+  certifications  String[]
+  languages       String[]
+
+  matchScore      Float
+  skillMatchScore Float
+  experienceScore Float
+  screeningScore  Float?
+  overallScore    Float
+
+  strengths          String[]
+  gaps               String[]
+  aiSummary          String?  @db.Text
+  recommendationNote String?  @db.Text
+  isRecommended      Boolean  @default(false)
+
+  parsedAt  DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("parsed_resumes")
+}
+
+
+
 model Notification {
   id            String   @id @default(uuid())
   userId        String
   user          User     @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
   applicationId String?
-  type          String   // e.g. "STATUS_CHANGE", "AI_INTERVIEW_READY"
+  type          String
   message       String
   isRead        Boolean  @default(false)
   createdAt     DateTime @default(now())
@@ -255,19 +266,17 @@ model Notification {
   @@map("notifications")
 }
 
-// ─── Payments & Subscriptions ─────────────────────────────────────────────────
-
 model Payment {
   id                String   @id @default(uuid())
   userId            String
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  planType          String   @default("STANDARD") // STANDARD or PREMIUM
-  amount            Int      // paise (e.g. 99900 = ₹999)
-  durationDays      Int      @default(30)        // 30 days = 1 month
+  planType          String   @default("STANDARD")
+  amount            Int
+  durationDays      Int      @default(30)
   razorpayOrderId   String   @unique
   razorpayPaymentId String?
   razorpaySignature String?
-  status            String   @default("PENDING") // PENDING, PAID, FAILED
+  status            String   @default("PENDING")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
