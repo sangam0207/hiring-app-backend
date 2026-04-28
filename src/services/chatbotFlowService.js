@@ -5,10 +5,11 @@ const {
   pushSnapshot,
   restorePreviousSnapshot,
 } = require("./chatbotSessionService");
+const { importLinkedInProfile } = require("./linkedinImportService");
 
 const STEP = {
-  MODE: -1, // Choose between 'create' or 'edit'
-  UPLOAD: 0, // Upload/paste resume for edit mode (only when in edit mode)
+  MODE: -1, // Choose between manual creation or LinkedIn import
+  LINKEDIN_URL: 0, // Collect LinkedIn profile URL for prefill flow
   NAME: 1,
   SECTOR: 2,
   ROLE: 3,
@@ -23,7 +24,7 @@ const STEP = {
 };
 
 const PROGRESS_MAP = {
-  // Edit mode: upload step (shown as 0/9 since it's not counted)
+  // LinkedIn import step: shown before the 9 guided resume steps
   0: null,
   // Create mode: NAME through CONTACT shown as 1/9 through 9/9
   1: "1/9",
@@ -675,30 +676,44 @@ function buildStepResponse(session, extras = {}) {
         markdown: introMarkdown(
           "Resume Builder Assistant",
           "Welcome! I'll help you create a professional resume.",
-          "Would you like to create a new resume from scratch, or edit and improve an existing one?",
+          "Choose how you want to begin.",
           acknowledgement,
           validationNoteFromErrors(errors),
         ),
         options: [
-          { label: "Create New Resume", value: "create" },
-          { label: "Edit Existing Resume", value: "edit" },
+          {
+            label: "Create Resume Manually",
+            value: "create",
+            icon: "file-text",
+          },
+          {
+            label: "Import from LinkedIn",
+            value: "linkedin",
+            icon: "linkedin",
+          },
         ],
         step: STEP.MODE,
         replaceLast,
         session,
       });
 
-    case STEP.UPLOAD:
+    case STEP.LINKEDIN_URL:
       return buildResponse({
-        type: "resume_upload",
+        type: "input",
         markdown: introMarkdown(
-          "Upload Your Resume",
-          "Let's improve your existing resume.",
-          "You can upload a PDF or paste your resume text below.",
+          "Import LinkedIn Profile",
+          "Paste your public LinkedIn profile URL and I will prefill your resume details.",
+          "Use format: https://www.linkedin.com/in/profile-id",
           acknowledgement,
           validationNoteFromErrors(errors),
         ),
-        step: STEP.UPLOAD,
+        input: {
+          type: "url",
+          placeholder: "https://www.linkedin.com/in/your-profile-id",
+          initialValue: values.value ?? "",
+          errors,
+        },
+        step: STEP.LINKEDIN_URL,
         replaceLast,
         session,
       });
@@ -739,7 +754,13 @@ function buildStepResponse(session, extras = {}) {
           customPlaceholder: "Enter your sector",
           allowMultiple: false,
           initialValue: values.value ?? session.data.customSector ?? "",
-          selected: values.value ? [values.value] : [],
+          selected: values.value
+            ? [values.value]
+            : session.data.customSector
+              ? [session.data.customSector]
+              : session.sector && session.sector !== "custom"
+                ? [SECTORS[session.sector]?.label || ""]
+                : [],
           errors,
         },
         step: STEP.SECTOR,
@@ -766,7 +787,11 @@ function buildStepResponse(session, extras = {}) {
           customPlaceholder: `Enter a custom ${config.label.toLowerCase()} role`,
           allowMultiple: false,
           initialValue: values.value ?? session.data.targetRole ?? "",
-          selected: values.value ? [values.value] : [],
+          selected: values.value
+            ? [values.value]
+            : session.data.targetRole
+              ? [session.data.targetRole]
+              : [],
           errors,
         },
         step: STEP.ROLE,
@@ -1322,18 +1347,113 @@ function validatePhone(phone) {
   return digits.length >= 7 && digits.length <= 15;
 }
 
+function mapLinkedInToSessionData(session, linkedInData) {
+  const data = linkedInData || {};
+
+  if (data.name) session.data.name = data.name;
+  if (data.email) session.data.email = String(data.email).trim();
+  if (data.phone != null) session.data.phone = String(data.phone).trim();
+  if (data.city) session.data.city = String(data.city).trim();
+  if (data.location) {
+    session.data.location = data.location;
+    session.data.city = data.location;
+  }
+
+  if (Array.isArray(data.skills) && data.skills.length) {
+    session.data.skills = [
+      ...new Set(
+        data.skills.map((item) => String(item).trim()).filter(Boolean),
+      ),
+    ];
+    computeWeightedSkills(session);
+  }
+
+  if (Array.isArray(data.education) && data.education.length) {
+    session.data.education = data.education
+      .map((item) => ({
+        qualification: String(item.qualification || "").trim(),
+        endYear: String(item.endYear || "").trim(),
+        institution: String(item.institution || "").trim(),
+      }))
+      .filter(
+        (entry) => entry.qualification || entry.endYear || entry.institution,
+      );
+  }
+
+  if (Array.isArray(data.certifications) && data.certifications.length) {
+    session.data.certifications = data.certifications
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+    session.data.certificationOption = session.data.certifications.length
+      ? "yes"
+      : "no";
+  }
+
+  if (data.targetRole || data.headline) {
+    session.data.targetRole = String(
+      data.targetRole || data.headline || "",
+    ).trim();
+  }
+
+  if (data.lastJobRole)
+    session.data.lastJobRole = String(data.lastJobRole).trim();
+  if (data.lastCompany)
+    session.data.lastCompany = String(data.lastCompany).trim();
+  if (data.lastDuration)
+    session.data.lastDuration = String(data.lastDuration).trim();
+
+  if (data.responsibilities) {
+    session.data.responsibilities = String(data.responsibilities).trim();
+    session.data.refinedResponsibilities = refineResponsibilityBullets(
+      session.data.responsibilities,
+      session,
+    );
+  }
+
+  if (
+    data.experienceType === "experienced" ||
+    data.experienceType === "fresher"
+  ) {
+    session.data.experienceType = data.experienceType;
+  }
+
+  if (data.yearsExperience != null) {
+    const years = String(data.yearsExperience).trim();
+    if (years) session.data.yearsExperience = years;
+  }
+
+  if (data.industry) {
+    const normalizedSector = normalizeSector(data.industry);
+    if (normalizedSector) {
+      session.sector = normalizedSector;
+      session.data.sector = normalizedSector;
+      session.data.customSector = null;
+    } else {
+      session.sector = "custom";
+      session.data.sector = "custom";
+      session.data.customSector = data.industry;
+    }
+  }
+
+  session.data.linkedin = {
+    imported: true,
+    identifier: data.identifier || null,
+    importedAt: new Date().toISOString(),
+    profileUrl: data.sourceProfileUrl || null,
+  };
+}
+
 async function processMessage(session, rawMessage) {
   const payload = parsePayload(rawMessage);
 
   // ──── STEP.MODE: Choose create or edit ────────────────────────────────
   if (session.step === STEP.MODE) {
     const mode = String(payload.option || payload.value || "").toLowerCase();
-    if (!["create", "edit"].includes(mode)) {
+    if (!["create", "linkedin"].includes(mode)) {
       return buildStepResponse(session, {
         replaceLast: true,
         errors: {
-          general:
-            "Please choose 'Create New Resume' or 'Edit Existing Resume'.",
+          general: "Please choose manual creation or LinkedIn import.",
         },
       });
     }
@@ -1348,72 +1468,60 @@ async function processMessage(session, rawMessage) {
         acknowledgement: "Great! Let's build your resume from scratch.",
       });
     } else {
-      // Move to UPLOAD step for editing existing resume
-      session.step = STEP.UPLOAD;
+      // Move to LinkedIn URL input step
+      session.step = STEP.LINKEDIN_URL;
       return buildStepResponse(session, {
-        acknowledgement: "Perfect! Let's improve your existing resume.",
+        acknowledgement:
+          "Perfect. Paste your LinkedIn profile URL and I'll prefill your resume.",
       });
     }
   }
 
-  // ──── STEP.UPLOAD: Handle resume upload / parsing results ────────────────────
-  if (session.step === STEP.UPLOAD) {
-    const parsedResume = payload.resume || null;
-
-    if (!parsedResume) {
+  // ──── STEP.LINKEDIN_URL: Import and prefill from LinkedIn ──────────────
+  if (session.step === STEP.LINKEDIN_URL) {
+    const linkedInUrl = String(payload.value || "").trim();
+    if (!linkedInUrl) {
       return buildStepResponse(session, {
         replaceLast: true,
-        errors: { general: "Unable to process resume. Please try again." },
+        values: { value: linkedInUrl },
+        errors: { value: "Please paste your LinkedIn profile URL." },
       });
     }
 
-    // Store the original parsed resume for reference
-    session.originalResume = JSON.parse(JSON.stringify(parsedResume));
-    session.resumeJson = JSON.parse(JSON.stringify(parsedResume));
+    const imported = await importLinkedInProfile(linkedInUrl);
+    if (!imported.ok) {
+      return buildStepResponse(session, {
+        replaceLast: true,
+        values: { value: linkedInUrl },
+        errors: {
+          value:
+            imported.error ||
+            "Could not import LinkedIn profile. Please continue manually.",
+        },
+      });
+    }
 
-    // Map parsed data to session.data structure
-    session.data.name = parsedResume.name || null;
-    session.data.phone = parsedResume.phone || null;
-    session.data.email = parsedResume.email || null;
-    session.data.location = parsedResume.location || null;
-    session.data.summary = parsedResume.summary || null;
-    session.data.skills = Array.isArray(parsedResume.skills)
-      ? parsedResume.skills
-      : [];
-    session.data.education = Array.isArray(parsedResume.education)
-      ? parsedResume.education.map((entry) => ({
-          qualification: entry?.qualification || entry?.degree || "",
-          endYear: entry?.endYear || entry?.year || "",
-          institution: entry?.institution || "",
-        }))
-      : [];
-    session.data.certifications = Array.isArray(parsedResume.certifications)
-      ? parsedResume.certifications
-          .map((entry) =>
-            typeof entry === "string" ? entry : entry?.name || "",
-          )
-          .filter(Boolean)
-      : [];
+    mapLinkedInToSessionData(session, {
+      ...imported.normalized,
+      identifier: imported.identifier,
+      sourceProfileUrl: linkedInUrl,
+    });
 
-    // Store experience as responsibilities for now (can be enhanced later)
-    if (
-      Array.isArray(parsedResume.experience) &&
-      parsedResume.experience.length > 0
-    ) {
-      const exp = parsedResume.experience[0];
-      session.data.lastJobRole = exp.jobTitle || null;
-      session.data.lastCompany = exp.company || null;
-      session.data.responsibilities = exp.description || null;
-      if (!session.data.targetRole) {
-        session.data.targetRole = exp.jobTitle || null;
-      }
+    if (session.sector === "custom" || session.data.targetRole) {
+      session.data.roleProfile = await inferRoleProfile(session, {
+        customSector: session.data.customSector,
+        targetRole: session.data.targetRole,
+      });
     }
 
     pushSnapshot(session);
-
-    // In edit flow, continue should generate immediately.
-    session.step = STEP.GENERATE;
-    return await handleGeneration(session);
+    session.step = STEP.NAME;
+    return buildStepResponse(session, {
+      replaceLast: true,
+      acknowledgement: imported.isPartial
+        ? "Mock LinkedIn profile fetched. We imported what was available, and you can now complete missing fields step by step."
+        : "Mock LinkedIn profile fetched successfully. Your details are prefilled and you can now review and edit them.",
+    });
   }
 
   if (payload.action === "back") {

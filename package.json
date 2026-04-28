@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@prisma/client": "5.14.0",
+    "apify-client": "^2.23.0",
     "aws-sdk": "^2.1691.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
