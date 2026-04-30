@@ -416,54 +416,82 @@ Keep questions concise (1 sentence each). Focus on motivation, relevant experien
 // GET /api/jobs/recommended - AI-powered job matching for candidates
 const getRecommendedJobs = async (req, res, next) => {
   try {
-    // Get candidate profile
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
+    // ✅ Get user's DEFAULT profile (IMPORTANT CHANGE)
+    const profile = await prisma.profile.findFirst({
+      where: {
+        userId: req.user.id,
+        isDefault: true,
+      },
       select: {
-        name: true, headline: true, summary: true, skills: true,
-        totalExperience: true, currentRole: true, currentCompany: true,
-        education: true, workExperience: true, location: true,
+        name: true,
+        headline: true,
+        summary: true,
+        skills: true,
+        totalExperience: true,
+        currentRole: true,
+        currentCompany: true,
+        education: true,
+        workExperience: true,
+        location: true,
       },
     });
 
-    if (!user || (!user.skills?.length && !user.headline && !user.summary)) {
-      return errorResponse(res, "Please complete your profile first (skills, headline) for AI matching.", 400);
+    // ❌ If no profile
+    if (!profile || (!profile.skills?.length && !profile.headline && !profile.summary)) {
+      return errorResponse(
+        res,
+        "Please complete your profile first (skills, headline) for AI matching.",
+        400
+      );
     }
 
-    // Get active jobs
+    // ✅ Get jobs
     const jobs = await prisma.job.findMany({
       where: { status: "ACTIVE" },
       select: {
-        id: true, title: true, description: true, requirements: true,
-        requiredSkills: true, experienceLevel: true, location: true,
-        salary: true, jobType: true, createdAt: true,
+        id: true,
+        title: true,
+        description: true,
+        requirements: true,
+        requiredSkills: true,
+        experienceLevel: true,
+        location: true,
+        salary: true,
+        jobType: true,
+        createdAt: true,
         hr: { select: { company: true } },
         _count: { select: { applications: true } },
       },
       orderBy: { createdAt: "desc" },
-      take: 50, // limit to 50 most recent for performance
+      take: 50,
     });
 
-    if (jobs.length === 0) {
+    if (!jobs.length) {
       return successResponse(res, { recommendations: [] });
     }
 
-    // Build candidate profile summary
+    // ✅ Build profile summary
     const profileSummary = [
-      user.headline && `Headline: ${user.headline}`,
-      user.currentRole && `Current Role: ${user.currentRole}`,
-      user.currentCompany && `Current Company: ${user.currentCompany}`,
-      user.totalExperience && `Experience: ${user.totalExperience} years`,
-      user.skills?.length && `Skills: ${user.skills.join(", ")}`,
-      user.location && `Location: ${user.location}`,
-      user.summary && `Summary: ${user.summary.slice(0, 300)}`,
-    ].filter(Boolean).join("\n");
+      profile.headline && `Headline: ${profile.headline}`,
+      profile.currentRole && `Current Role: ${profile.currentRole}`,
+      profile.currentCompany && `Current Company: ${profile.currentCompany}`,
+      profile.totalExperience && `Experience: ${profile.totalExperience} years`,
+      profile.skills?.length && `Skills: ${profile.skills.join(", ")}`,
+      profile.location && `Location: ${profile.location}`,
+      profile.summary && `Summary: ${profile.summary.slice(0, 300)}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
 
-    // Build jobs list for AI
-    const jobsList = jobs.map((j, i) => (
-      `[${i}] "${j.title}" at ${j.hr?.company || "Unknown"} | Skills: ${j.requiredSkills.join(", ")} | Level: ${j.experienceLevel} | ${j.location || "Remote"}`
-    )).join("\n");
+    // ✅ Jobs list for AI
+    const jobsList = jobs
+      .map(
+        (j, i) =>
+          `[${i}] "${j.title}" at ${j.hr?.company || "Unknown"} | Skills: ${j.requiredSkills.join(", ")} | Level: ${j.experienceLevel} | ${j.location || "Remote"}`
+      )
+      .join("\n");
 
+    // ✅ AI call
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0.1,
@@ -472,11 +500,12 @@ const getRecommendedJobs = async (req, res, next) => {
       messages: [
         {
           role: "system",
-          content: "You are an expert job matching AI. Match candidates to jobs based on skills, experience, and career trajectory. Return JSON only.",
+          content:
+            "You are an expert job matching AI. Match candidates to jobs based on skills, experience, and career trajectory. Return JSON only.",
         },
         {
           role: "user",
-          content: `Match this candidate profile against the job listings and return the top matches.
+          content: `Match this candidate profile against the job listings.
 
 === CANDIDATE PROFILE ===
 ${profileSummary}
@@ -487,25 +516,38 @@ ${jobsList}
 Return JSON:
 {
   "matches": [
-    { "index": number (job index from list), "matchPercent": number (0-100), "reason": "1 sentence why this is a good match" }
+    { "index": number, "matchPercent": number, "reason": "short reason" }
   ]
 }
 
 Rules:
-- Return up to 6 best matching jobs, sorted by matchPercent descending
-- Only include jobs with matchPercent >= 40
-- Be realistic about matching — consider skills overlap, experience level fit, and career relevance
-- matchPercent should reflect genuine fit, not just keyword overlap`,
+- Max 6 jobs
+- matchPercent >= 40
+- Sort by matchPercent desc
+- Be realistic`,
         },
       ],
     });
 
-    const parsed = JSON.parse(response.choices[0].message.content);
+    // ✅ Safe parse
+    let parsed;
+    try {
+      parsed = JSON.parse(response.choices[0].message.content);
+    } catch (err) {
+      console.error("AI JSON Parse Error:", err.message);
+      return successResponse(res, { recommendations: [] });
+    }
+
     const matches = (parsed.matches || [])
-      .filter(m => m.index >= 0 && m.index < jobs.length && m.matchPercent >= 40)
+      .filter(
+        (m) =>
+          m.index >= 0 &&
+          m.index < jobs.length &&
+          m.matchPercent >= 40
+      )
       .sort((a, b) => b.matchPercent - a.matchPercent)
       .slice(0, 6)
-      .map(m => ({
+      .map((m) => ({
         job: jobs[m.index],
         matchPercent: Math.round(m.matchPercent),
         reason: m.reason,
