@@ -144,7 +144,7 @@ const triggerAIInterview = async (req, res, next) => {
 const startAIInterview = async (req, res, next) => {
   try {
     const { applicationId } = req.params;
-    const { cameraEnabled } = req.body;
+    const { cameraEnabled, agreedToFairUse } = req.body;
 
     const application = await prisma.application.findUnique({
       where: { id: applicationId },
@@ -194,6 +194,16 @@ const startAIInterview = async (req, res, next) => {
         message: "Camera access is required to start the interview. Please enable your camera and try again.",
         error: {
           code: "CAMERA_REQUIRED",
+        },
+      });
+    }
+
+    if (!agreedToFairUse) {
+      return res.status(400).json({
+        success: false,
+        message: "Please accept the interview disclaimer before starting.",
+        error: {
+          code: "DISCLAIMER_REQUIRED",
         },
       });
     }

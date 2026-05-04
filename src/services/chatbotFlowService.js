@@ -44,10 +44,12 @@ const PHONE_DIGIT_RE = /\d/g;
 const CITY_RE = /^[a-zA-Z .'-]{2,60}$/;
 
 const BASE_SECTOR_OPTIONS = [
-  "Hospitality",
   "Aviation",
-  "Retail",
-  "Customer Service",
+  "Hospitality",
+  "IT",
+  "Healthcare",
+  "Defence",
+  "Energy",
 ];
 
 const SECTORS = {
@@ -91,45 +93,86 @@ const SECTORS = {
     responsibilityHint:
       "Supported passengers, followed safety procedures, and helped with boarding and service operations.",
   },
-  retail: {
-    label: "Retail",
+  it: {
+    label: "IT",
     roles: [
-      "Sales Associate",
-      "Store Assistant",
-      "Cashier",
-      "Inventory Associate",
-      "Visual Merchandising Assistant",
+      "Software Developer",
+      "Frontend Developer",
+      "Backend Developer",
+      "QA Engineer",
+      "IT Support Associate",
     ],
     skillChips: [
-      "Sales Support",
-      "Customer Service",
-      "POS Handling",
-      "Inventory Handling",
-      "Upselling",
-      "Product Knowledge",
+      "Problem Solving",
+      "JavaScript",
+      "API Integration",
+      "Debugging",
+      "Version Control",
+      "System Design",
     ],
     responsibilityHint:
-      "Assisted customers, processed purchases, organized stock, and maintained product displays.",
+      "Developed and maintained software features, fixed bugs, collaborated with teams, and ensured reliable application performance.",
   },
-  "customer service": {
-    label: "Customer Service",
+  healthcare: {
+    label: "Healthcare",
     roles: [
-      "Customer Support Executive",
-      "Call Center Associate",
-      "Chat Support Associate",
-      "Client Relations Associate",
-      "Support Specialist",
+      "Staff Nurse",
+      "Clinical Assistant",
+      "Medical Officer",
+      "Healthcare Coordinator",
+      "Lab Technician",
     ],
     skillChips: [
       "Communication",
-      "Active Listening",
-      "CRM Usage",
-      "Issue Resolution",
+      "Patient Care",
+      "Clinical Documentation",
+      "Infection Control",
+      "Emergency Response",
       "Empathy",
       "Time Management",
     ],
     responsibilityHint:
-      "Handled customer questions, updated support records, and resolved service issues across channels.",
+      "Delivered patient support, maintained clinical records, coordinated with care teams, and followed healthcare safety protocols.",
+  },
+  defence: {
+    label: "Defence",
+    roles: [
+      "Security Officer",
+      "Defence Analyst",
+      "Operations Associate",
+      "Field Support Associate",
+      "Compliance Officer",
+    ],
+    skillChips: [
+      "Discipline",
+      "Risk Assessment",
+      "Operational Planning",
+      "Situational Awareness",
+      "Communication",
+      "Incident Reporting",
+    ],
+    responsibilityHint:
+      "Supported operational readiness, monitored compliance, reported incidents, and executed assigned procedures with discipline.",
+  },
+  energy: {
+    label: "Energy",
+    roles: [
+      "Plant Operator",
+      "Energy Analyst",
+      "Field Technician",
+      "Maintenance Engineer",
+      "Safety Coordinator",
+    ],
+    skillChips: [
+      "Safety Compliance",
+      "Equipment Monitoring",
+      "Preventive Maintenance",
+      "Data Analysis",
+      "Process Optimization",
+      "Team Coordination",
+    ],
+    responsibilityHint:
+      "Monitored systems, followed safety standards, supported maintenance tasks, and helped optimize energy operations.",
   },
   custom: {
     label: "Selected Sector",
@@ -156,8 +199,10 @@ const SECTORS = {
 const TONE_BY_SECTOR = {
   hospitality: "customer service, guest satisfaction, and service reliability",
   aviation: "safety, communication, discipline, and process compliance",
-  retail: "sales support, customer engagement, and store operations",
-  "customer service": "service quality, empathy, and issue resolution",
+  it: "problem-solving, software quality, and technical collaboration",
+  healthcare: "patient safety, empathy, and clinical reliability",
+  defence: "discipline, operational precision, and compliance",
+  energy: "safety, operational consistency, and process optimization",
   custom: "role-relevant practical execution, professionalism, and reliability",
 };
 
@@ -172,15 +217,25 @@ const CERT_SUGGESTIONS_BY_SECTOR = {
     "Cabin Crew Training Certification",
     "Aviation Safety Training",
   ],
-  retail: [
-    "Retail Sales Certification",
-    "Customer Service Certification",
-    "POS System Training",
+  it: [
+    "AWS Certification",
+    "Google Associate Cloud Engineer",
+    "Certified Scrum Master",
   ],
-  "customer service": [
-    "Customer Support Certification",
-    "CRM Platform Training",
-    "Communication and Conflict Resolution Training",
+  healthcare: [
+    "Basic Life Support (BLS)",
+    "Advanced Cardiac Life Support (ACLS)",
+    "Clinical Nursing Certification",
+  ],
+  defence: [
+    "Security Management Certification",
+    "Risk and Compliance Certification",
+    "Emergency Response Training",
+  ],
+  energy: [
+    "NEBOSH Safety Certification",
+    "Energy Management Certification",
+    "Industrial Maintenance Certification",
   ],
   technical: [
     "AWS Certification",
@@ -556,10 +611,36 @@ function normalizeSector(value) {
     return "hospitality";
   if (v.includes("aviation") || v.includes("airline") || v.includes("flight"))
     return "aviation";
-  if (v.includes("retail") || v.includes("store") || v.includes("shop"))
-    return "retail";
-  if (v.includes("customer") || v.includes("support") || v.includes("call"))
-    return "customer service";
+  if (
+    v === "it" ||
+    v.includes("software") ||
+    v.includes("developer") ||
+    v.includes("tech") ||
+    v.includes("information technology")
+  )
+    return "it";
+  if (
+    v.includes("health") ||
+    v.includes("medical") ||
+    v.includes("hospital") ||
+    v.includes("nursing")
+  )
+    return "healthcare";
+  if (
+    v.includes("defence") ||
+    v.includes("defense") ||
+    v.includes("army") ||
+    v.includes("security")
+  )
+    return "defence";
+  if (
+    v.includes("energy") ||
+    v.includes("power") ||
+    v.includes("oil") ||
+    v.includes("gas") ||
+    v.includes("renewable")
+  )
+    return "energy";
   return null;
 }
 
