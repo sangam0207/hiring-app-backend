@@ -2,6 +2,38 @@ const prisma = require("../config/prisma");
 const openai = require("../config/openai");
 const { successResponse, errorResponse, paginatedResponse } = require("../utils/response");
 
+const formatSalaryInrLpa = (salary) => {
+  const raw = String(salary || "").trim();
+  if (!raw) return null;
+
+  const numbers = raw
+    .replace(/,/g, "")
+    .match(/\d+(?:\.\d+)?/g)
+    ?.map(Number)
+    .filter((n) => Number.isFinite(n));
+
+  if (!numbers?.length) return raw;
+
+  const hasLpaHint = /lpa|lakh|lakhs|lac/i.test(raw);
+  const hasPeriodicHint = /hour|month|week|day/i.test(raw);
+
+  const normalize = (value) =>
+    Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, "");
+
+  if (hasLpaHint || (!hasPeriodicHint && numbers[0] <= 250)) {
+    const min = normalize(numbers[0]);
+    const max = numbers[1] != null ? normalize(numbers[1]) : null;
+    return max ? `INR ${min} - ${max} LPA` : `INR ${min} LPA`;
+  }
+
+  return raw;
+};
+
+const withCandidateSalary = (job) => ({
+  ...job,
+  salaryDisplay: formatSalaryInrLpa(job.salary),
+});
+
 // POST /api/jobs - HR creates a job
 const createJob = async (req, res, next) => {
   try {
@@ -125,7 +157,7 @@ const getJobs = async (req, res, next) => {
       const total = filteredIds.length;
       const paginatedIds = filteredIds.slice(skip, skip + take);
 
-      const jobs = paginatedIds.length > 0
+      let jobs = paginatedIds.length > 0
         ? await prisma.job.findMany({
             where: { id: { in: paginatedIds } },
             orderBy: { createdAt: "desc" },
@@ -136,6 +168,10 @@ const getJobs = async (req, res, next) => {
           })
         : [];
 
+      if (!isHR) {
+        jobs = jobs.map(withCandidateSalary);
+      }
+
       return paginatedResponse(res, { jobs }, {
         total,
         page: parseInt(page),
@@ -144,7 +180,7 @@ const getJobs = async (req, res, next) => {
       });
     }
 
-    const [jobs, total] = await Promise.all([
+    const [fetchedJobs, total] = await Promise.all([
       prisma.job.findMany({
         where,
         skip,
@@ -157,6 +193,8 @@ const getJobs = async (req, res, next) => {
       }),
       prisma.job.count({ where }),
     ]);
+
+    const jobs = isHR ? fetchedJobs : fetchedJobs.map(withCandidateSalary);
 
     return paginatedResponse(res, { jobs }, {
       total,
@@ -191,7 +229,10 @@ const getJobById = async (req, res, next) => {
       return errorResponse(res, "Access denied.", 403);
     }
 
-    return successResponse(res, { job });
+    const formattedJob =
+      req.user?.role === "CANDIDATE" ? withCandidateSalary(job) : job;
+
+    return successResponse(res, { job: formattedJob });
   } catch (error) {
     next(error);
   }
@@ -548,7 +589,7 @@ Rules:
       .sort((a, b) => b.matchPercent - a.matchPercent)
       .slice(0, 6)
       .map((m) => ({
-        job: jobs[m.index],
+        job: withCandidateSalary(jobs[m.index]),
         matchPercent: Math.round(m.matchPercent),
         reason: m.reason,
       }));
