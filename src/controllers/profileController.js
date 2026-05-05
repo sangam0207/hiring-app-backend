@@ -2,7 +2,7 @@ const prisma = require("../config/prisma");
 const { successResponse, errorResponse } = require("../utils/response");
 const { extractTextFromResume } = require("../utils/resumeExtractor");
 const { parseProfileFromResume } = require("../services/resumeParserService");
-
+const {uploadResume}= require("../services/s3Service");
 // ─── GET /api/profiles ────────────────────────────────────────────────────────
 const getProfiles = async (req, res, next) => {
   try {
@@ -207,6 +207,34 @@ const autofillFromResume = async (req, res, next) => {
     }
 
     const parsed = await parseProfileFromResume(resumeText);
+
+    // ✅ ADD THIS BLOCK ONLY (no format change)
+
+    const userId = req.user.id;
+
+    // 1. Upload to S3
+    const fileUrl = await uploadResume(
+      req.file.buffer,
+      req.file.originalname,
+      req.file.mimetype
+    );
+
+    // 2. Find default profile
+    const defaultProfile = await prisma.profile.findFirst({
+      where: { userId, isDefault: true },
+    });
+
+    // 3. Save resume & link with profile
+    await prisma.resume.create({
+      data: {
+        userId,
+        profileId: defaultProfile?.id || null,
+        fileName: req.file.originalname,
+        fileUrl,
+      },
+    });
+
+    // ✅ END BLOCK
 
     return successResponse(res, { profile: parsed }, "Resume parsed. Review and save as a new profile.");
   } catch (error) { next(error); }
